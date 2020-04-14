@@ -39,6 +39,7 @@ coverage.xml
 
 # Build and docs folder/files
 build/*
+#!build/sphinx/html/**/*
 dist/*
 sdist/*
 docs/api/*
