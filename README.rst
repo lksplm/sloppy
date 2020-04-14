@@ -1,10 +1,11 @@
-======
-sloppy (Simon Lab Optics Package in PYthon)
-======
 
 .. image:: logo.svg
-  :width: 600
+  :width: 800
   :alt: Logo
+
+======
+Simon Lab Optics Package in PYthon
+======
 
 The Simon Lab Optics Package in PYthon is a collection of computational methods for the design of optical systems, especially cavities.
 
