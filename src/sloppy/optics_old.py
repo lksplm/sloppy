@@ -224,7 +224,7 @@ class CurvedMirror(Optic):
     """
     def __init__(self, p=(0,0,0), n=(0,0,1), R=1., curv='CC', diam=25.4, thet=0.):
         super().__init__(p, n, diam)
-        self.R = R
+        self.R = abs(R)
         x, dst = self.curved_offsets(self.R, self.r)
         self.intersect_d = dst
         if curv=='CC':
@@ -386,5 +386,53 @@ class CurvedGlass(CurvedMirror):
         return rout    
     
 class Screen(Optic):
-    def __init__(self, p=(0,0,0), n=(0,0,1), diam=25.4):
+    def __init__(self, p=(0,0,0), n=(0,0,1), diam=25.4, ex=(1.,0,0)):
         super().__init__(p, n, diam)
+        ex = norm(np.array(ex))
+        ay = norm(np.cross(self.n, ex))
+        ax = norm(np.cross(self.n, -ay))
+        self.ax = ax
+        self.ay = ay
+        self.R = np.stack([self.ax, self.ay, self.n]).T
+        
+    def r_from_screen_coords(self, v):
+        """Turns 2d vectors from screen coordinates with shape (N, 2) into global coords."""
+        v = np.atleast_2d(v)
+        vs = np.pad(v, pad_width=((0,0), (0,1)))
+        vr = np.einsum("ij,kj->ki",self.R,vs) + self.p
+        return vr
+    
+    def r_to_screen_coords(self, vr):
+        """Turns 3d vectors from global coordinates with shape (N, 3) into screen coords with shape (N, 2)."""
+        vr = np.atleast_2d(vr)
+        vss = np.einsum("ij,kj->ki",self.R.T, vr-self.p)
+        return vss[:,:-1]
+    
+    def s_from_screen_coords(self, mu):
+        """Turns 2d slope vectors from screen coordinates with shape (N, 2) into global normal vectors (N, 3)."""
+        mu = np.atleast_2d(mu)
+        s0 = np.stack([mu[:,0], mu[:,1], np.sqrt(1 - (mu[:,0])**2 - (mu[:,1])**2)], axis=1) #create vector normal to screen
+        s0 = np.einsum("ij,kj->ki",self.R,s0) #rotate into global coordinates
+        return s0
+        
+    def s_to_screen_coords(self, vr):
+        """Turns 3d normal vectors from global coordinates with shape (N, 3) into 2d slope vectors with shape (N, 2)."""
+        vr = np.atleast_2d(vr)
+        vss = np.einsum("ij,kj->ki",self.R.T, vr)#rotate back to screen coords
+        return vss[:,:-1]
+    
+    def eigenvectors_to_rays(self, mu):
+        """Convert eigenvectors of ABCD matrix mu of shape (N,4) into 3D rays for raytracing of shape (2, N, 3)."""
+        mu = np.atleast_2d(mu)
+        r0 = self.r_from_screen_coords(mu[:,:2])
+        s0 = self.s_from_screen_coords(mu[:,2:])
+        ray0 = np.stack([np.atleast_2d(r0), np.atleast_2d(s0)], axis=0)
+        return ray0
+    
+    def rays_to_eigenvectors(self, ray):
+        """Convert eigenvectors of ABCD matrix mu of shape (N,4) into 3D rays for raytracing of shape (2, N, 3)."""
+        r0 = self.r_to_screen_coords(ray[0,:,:])
+        s0 = self.s_to_screen_coords(ray[1,:,:])
+        mu = np.concatenate([r0, s0], axis=1)
+        return mu
+    
