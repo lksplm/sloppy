@@ -58,22 +58,23 @@ def GravEM(l=51.0, theta=20., axialL00 = 51.0, R=100.0):
     qi=7.75
     #reference plane is expected between first and last element!
     elements = [CurvedMirror(p=ps[0], n=ns[0], ax=ax_x[0], ay=ax_y[0], Rbasis=Rtr[0], diameter=qi, R=R, curv='CC', thet=angles[0]),\
-                CurvedMirror(p=ps[1], n=ns[1], ax=ax_x[1], ay=ax_y[1], Rbasis=Rtr[1], diameter=qi, R=R, curv='CC', thet=angles[0]),\
-                CurvedMirror(p=ps[2], n=ns[2], ax=ax_x[2], ay=ax_y[2], Rbasis=Rtr[2], diameter=qi, R=R, curv='CC', thet=angles[0]),\
-                CurvedMirror(p=ps[3], n=ns[3], ax=ax_x[3], ay=ax_y[3], Rbasis=Rtr[3], diameter=qi, R=R, curv='CC', thet=angles[0])]
+                CurvedMirror(p=ps[1], n=ns[1], ax=ax_x[1], ay=ax_y[1], Rbasis=Rtr[1], diameter=qi, R=R, curv='CC', thet=angles[1]),\
+                CurvedMirror(p=ps[2], n=ns[2], ax=ax_x[2], ay=ax_y[2], Rbasis=Rtr[2], diameter=qi, R=R, curv='CC', thet=angles[2]),\
+                CurvedMirror(p=ps[3], n=ns[3], ax=ax_x[3], ay=ax_y[3], Rbasis=Rtr[3], diameter=qi, R=R, curv='CC', thet=angles[3])]
     
     return elements
 
-def Lens_cav(arm1=50., arm2=55., base=19., angle=150., lens_dist=11.075, lens_diam=6.35, lens_thick=4., Rlens=5.0):
+def LensCav(arm1=50., arm2=55., base=19., angle=150., lens_dist=21.52449, lens_diam=6.35, lens_thick=4., Rlens=5.0):
     angle = np.deg2rad(angle)
-    p0 = np.array([lens_dist/2.-lens_thick/2.,0,0])
-    p1 = np.array([lens_dist/2.+lens_thick/2.,0,0])
+    eps = 1e-4 #hack
+    p0 = np.array([lens_dist/2.-lens_thick/2.,eps,0])
+    p1 = np.array([lens_dist/2.+lens_thick/2.,-eps,0])
     p2 = np.array([arm1/2.,0,0])
     p3 = np.array([np.cos(angle)*arm2/2.,base,np.sin(angle)*arm2/2.])
     p4 = np.array([-np.cos(angle)*arm2/2.,base,-np.sin(angle)*arm2/2.])
     p5 = np.array([-arm1/2.,0,0])
-    p6 = np.array([-lens_dist/2.-lens_thick/2.,0,0])
-    p7 = np.array([-lens_dist/2.+lens_thick/2.,0,0])
+    p6 = np.array([-lens_dist/2.-lens_thick/2.,-eps,0])
+    p7 = np.array([-lens_dist/2.+lens_thick/2.,eps,0])
     ps = np.stack([p0,p1,p2,p3,p4,p5,p6,p7], axis=0)
     
     geom = geometry(ps)
@@ -85,10 +86,7 @@ def Lens_cav(arm1=50., arm2=55., base=19., angle=150., lens_dist=11.075, lens_di
     ax_y = 0.5*(geom['yin']+geom['yout'])
     
     #fix normal vectosfor transmission
-    ns[0,:] = np.array([-1.,0,0])
-    ns[1,:] = np.array([-1.,0,0])
-    ns[6,:] = np.array([-1.,0,0])
-    ns[7,:] = np.array([-1.,0,0])
+    ns[[0,1,6,7],:] = np.array([-1.,0,0])
     #fix axis transmission
     ax_x[[0,1,6,7],:] = np.array([0,-1.,0])
     ax_y[[0,1,6,7],:] = np.array([0,0,1.0])
@@ -97,9 +95,10 @@ def Lens_cav(arm1=50., arm2=55., base=19., angle=150., lens_dist=11.075, lens_di
     
     hi = 12.7
     qi=7.75
-    ng = 1.41
+    ng = 1.4537#1.41
+     #negative sign of firstt cuved surface for abcd matrix
     elements = [Glass(p=ps[0], n=ns[0], ax=ax_x[0], ay=ax_y[0], Rbasis=Rtr[0], diameter=lens_diam, n2=ng),\
-                CurvedGlass(p=ps[1], n=ns[1], ax=ax_x[1], ay=ax_y[1], Rbasis=Rtr[1], diameter=lens_diam, R=Rlens, curv='CC', n1=ng),\
+                CurvedGlass(p=ps[1], n=ns[1], ax=ax_x[1], ay=ax_y[1], Rbasis=Rtr[1], diameter=lens_diam, R=-Rlens, curv='CC', n1=ng),\
                 Mirror(p=ps[2], n=ns[2], ax=ax_x[2], ay=ax_y[2], Rbasis=Rtr[2], diameter=hi),\
                 Mirror(p=ps[3], n=ns[3], ax=ax_x[3], ay=ax_y[3], Rbasis=Rtr[3], diameter=hi),\
                 Mirror(p=ps[4], n=ns[4], ax=ax_x[4], ay=ax_y[4], Rbasis=Rtr[4], diameter=hi),\
@@ -108,9 +107,9 @@ def Lens_cav(arm1=50., arm2=55., base=19., angle=150., lens_dist=11.075, lens_di
                 Glass(p=ps[7], n=ns[7], ax=ax_x[7], ay=ax_y[7], Rbasis=Rtr[7], diameter=lens_diam, n1=ng)]
     return elements
 
-def OriginalTwister(betal, R=25., Rlarge=-75., thet=10., asym = 1.25):
+def OriginalTwister(betal=31.67, R=25., Rlarge=-75., thet=20., asym = 1.25):
     thet = np.deg2rad(thet)
-    l = betal*R
+    l = betal#*R
     d1 = l*np.tan(thet/2)
     d2 = d1
     p1 = np.array([-d1, 0, -l/2])
@@ -142,3 +141,106 @@ def OriginalTwister(betal, R=25., Rlarge=-75., thet=10., asym = 1.25):
                 CurvedMirror(p=ps[3], n=ns[3], ax=ax_x[3], ay=ax_y[3], Rbasis=Rtr[3], diameter=qi, R=R, curv='CC', thet=angles[3])]
           
     return elements
+
+def LongLensCavMatt(betal=120.8269, rExtraIntra=5.2, angle=16., lens_dist=25.1, lens_diam=6.35, lens_thick=4., Rlens=25.0):
+    """
+    Long lens cavity with lens curved surfaces facing outwards!
+    """
+    angle = np.deg2rad(angle)
+    eps = 0. #1e-5 #hack
+    
+    L = betal*(1 + rExtraIntra)/4
+    l = L/np.sqrt(1. + 2*np.tan(angle/2.)**2)
+    
+    d1 = l*np.tan(angle/2.)
+    
+    p0 = np.array([-d1, 0., -l/2.])
+    p1 = np.array([0., -d1, l/2.])
+    p2 = np.array([d1, 0., -l/2.])
+    p3 = np.array([0., d1, l/2.])
+    
+    aa = 0.5*(betal*rExtraIntra - 3*L)
+    v12N = norm(p1 - p0)
+    pL1 = p0 + aa*v12N
+    pL2 = p0 + (aa+betal)*v12N
+    
+    pL1G = pL1 + lens_thick/2.*v12N
+    pL1C = pL1 - lens_thick/2.*v12N
+    
+    pL2G = pL2 - lens_thick/2.*v12N
+    pL2C = pL2 + lens_thick/2.*v12N
+    
+    ps = np.stack([pL2G, pL2C, p1, p2, p3, p0, pL1C, pL1G], axis=0)
+    
+    geom = geometry_new(ps)
+    ns = geom['refl']
+    ps = geom['mir']
+    angles = geom['angles']
+    Rtr = geom['R']
+    ax_x = geom['xin']
+    ax_y = np.cross(ns, ax_x)
+    
+    hi = 12.7
+    qi=7.75
+    ng = 1.4537
+
+    #negative sign of firstt cuved surface for abcd matrix
+    elements = [CurvedGlass(p=ps[0], n=ns[0], ax=ax_x[0], ay=ax_y[0], Rbasis=Rtr[0], diameter=lens_diam, R=Rlens, curv='CX', n2=ng),\
+                Glass(p=ps[1], n=ns[1], ax=ax_x[1], ay=ax_y[1], Rbasis=Rtr[1], diameter=lens_diam, n1=ng),\
+                Mirror(p=ps[2], n=ns[2], ax=ax_x[2], ay=ax_y[2], Rbasis=Rtr[2], diameter=hi),\
+                Mirror(p=ps[3], n=ns[3], ax=ax_x[3], ay=ax_y[3], Rbasis=Rtr[3], diameter=hi),\
+                Mirror(p=ps[4], n=ns[4], ax=ax_x[4], ay=ax_y[4], Rbasis=Rtr[4], diameter=hi),\
+                Mirror(p=ps[5], n=ns[5], ax=ax_x[5], ay=ax_y[5], Rbasis=Rtr[5], diameter=hi),\
+                Glass(p=ps[6], n=ns[6], ax=ax_x[6], ay=ax_y[6], Rbasis=Rtr[6], diameter=lens_diam, n2=ng),\
+                CurvedGlass(p=ps[7], n=ns[7], ax=ax_x[7], ay=ax_y[7], Rbasis=Rtr[7], diameter=lens_diam, R=-Rlens, curv='CC', n1=ng)]
+    
+    return elements#, geom
+
+def LongLensCav(betal=120.8269, rExtraIntra=5.2, angle=16., lens_dist=25.1, lens_diam=6.35, lens_thick=4., Rlens=25.0):
+    angle = np.deg2rad(angle)
+    
+    L = betal*(1 + rExtraIntra)/4
+    l = L/np.sqrt(1. + 2*np.tan(angle/2.)**2)
+    
+    d1 = l*np.tan(angle/2.)
+    
+    p0 = np.array([-d1, 0., -l/2.])
+    p1 = np.array([0., -d1, l/2.])
+    p2 = np.array([d1, 0., -l/2.])
+    p3 = np.array([0., d1, l/2.])
+    
+    aa = 0.5*(betal*rExtraIntra - 3*L)
+    v12N = norm(p1 - p0)
+    pL1 = p0 + aa*v12N
+    pL2 = p0 + (aa+betal)*v12N
+    
+    pL1G = pL1 + lens_thick/2.*v12N
+    pL1C = pL1 - lens_thick/2.*v12N
+    
+    pL2G = pL2 - lens_thick/2.*v12N
+    pL2C = pL2 + lens_thick/2.*v12N
+    
+    #ps = np.stack([pL1G, pL1C, p0, p1, p2, p3, pL2C, pL2G], axis=0)
+    
+    geom = geometry_new(ps)
+    ns = geom['refl']
+    ps = geom['mir']
+    angles = geom['angles']
+    Rtr = geom['R']
+    ax_x = geom['xin']
+    ax_y = np.cross(ns, ax_x)
+    
+    hi = 12.7
+    qi=7.75
+    ng = 1.4537
+    #negative sign of firstt cuved surface for abcd matrix
+    elements = [Glass(p=ps[0], n=ns[0], ax=ax_x[0], ay=ax_y[0], Rbasis=Rtr[0], diameter=lens_diam, n2=ng),\
+                CurvedGlass(p=ps[1], n=ns[1], ax=ax_x[1], ay=ax_y[1], Rbasis=Rtr[1], diameter=lens_diam, R=-Rlens, curv='CX', n1=ng),\
+                Mirror(p=ps[2], n=ns[2], ax=ax_x[2], ay=ax_y[2], Rbasis=Rtr[2], diameter=hi),\
+                Mirror(p=ps[3], n=ns[3], ax=ax_x[3], ay=ax_y[3], Rbasis=Rtr[3], diameter=hi),\
+                Mirror(p=ps[4], n=ns[4], ax=ax_x[4], ay=ax_y[4], Rbasis=Rtr[4], diameter=hi),\
+                Mirror(p=ps[5], n=ns[5], ax=ax_x[5], ay=ax_y[5], Rbasis=Rtr[5], diameter=hi),\
+                CurvedGlass(p=ps[6], n=ns[6], ax=ax_x[6], ay=ax_y[6], Rbasis=Rtr[6], diameter=lens_diam, R=Rlens, curv='CC', n2=ng),\
+                Glass(p=ps[7], n=ns[7], ax=ax_x[7], ay=ax_y[7], Rbasis=Rtr[7], diameter=lens_diam, n1=ng)]
+
+    return elements#, geom

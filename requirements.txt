@@ -18,3 +18,12 @@
 numpy
 matplotlib
 k3d
+pyyaml
+pandas
+numba
+datashader
+colorcet
+bokeh
+holoviews
+panel
+param

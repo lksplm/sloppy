@@ -28,7 +28,7 @@ class Optic:
         m (ndarray): ABCD matrix corresponing to this element (4x4).
 
     """
-    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, Rbasis=np.eye(3)):
+    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, Rbasis=np.eye(4)):
         self.rapt = diameter/2.
         self.p = np.array(p, dtype=np.float64)
         self.n = np.array(norm(n), dtype=np.float64)
@@ -73,12 +73,12 @@ class Optic:
     
 class Mirror(Optic):
     """Plane mirror, no extra arguments."""
-    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, Rbasis=np.eye(3)):
+    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, Rbasis=np.eye(4)):
         super().__init__(p, n, ax, ay, diameter, Rbasis)
         
 class Screen(Optic):
     """Plane mirror, no extra arguments."""
-    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, Rbasis=np.eye(3)):
+    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, Rbasis=np.eye(4)):
         super().__init__(p, n, ax, ay, diameter, Rbasis)
         self.jopt = JitOptic(p=self.p, n=self.n, ax=self.ax, ay=self.ay, Rot=self.Rot, rapt=self.rapt, R=0., nratio=1.0, otype=1)
         
@@ -138,7 +138,7 @@ class CurvedMirror(Optic):
         TODO: Implement thet
 
     """
-    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, R=1., curv='CC', thet=0., Rbasis=np.eye(3)):
+    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, R=1., curv='CC', thet=0., Rbasis=np.eye(4)):
         super().__init__(p, n, ax, ay, diameter, Rbasis)
         self.R = abs(R)
         if curv == 'CC':
@@ -173,8 +173,10 @@ class Glass(Optic):
         n2 (float): Index of refraction after the interface.
 
     """
-    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, n1=1., n2=1., Rbasis=np.eye(3)):
+    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, n1=1., n2=1., Rbasis=np.eye(4)):
         super().__init__(p, n, ax, ay, diameter, Rbasis)
+        self.n1 = n1
+        self.n2 = n2
         self.nratio = n1/n2
         self.jopt = JitOptic(p=self.p, n=self.n, ax=self.ax, ay=self.ay, Rot=self.Rot, rapt=self.rapt, nratio=self.nratio, otype=4)
         m = np.identity(4)
@@ -197,8 +199,10 @@ class CurvedGlass(Optic):
     TODO: Implement thet
 
     """
-    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, R=1., curv='CC', n1=1., n2=1., Rbasis=np.eye(3)):
+    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, R=1., curv='CC', n1=1., n2=1., Rbasis=np.eye(4)):
         super().__init__(p, n, ax, ay, diameter, Rbasis)
+        self.n1 = n1
+        self.n2 = n2
         self.nratio = n1/n2
         self.R = abs(R)
         self.curv = curv

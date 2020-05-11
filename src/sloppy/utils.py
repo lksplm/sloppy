@@ -3,8 +3,85 @@ import k3d
 from k3d.platonic import PlatonicSolid
 from itertools import product
 
+
 #geometry construction
+
 def geometry(mir):
+    """Construct a cavity geometry from mirror positions.
+
+    The function is more general and can also treat other optics like lenses etc.,
+    one just has to be careful with the normal vectors of transmitting elements.
+
+
+    Args:
+        mir (ndarray): Array containing the mirror positions with shape (Nmirror, 3).
+
+    Returns:
+        A dictonary including all the geometry of the optical elements:
+            {
+                'M': pairwise distance matrix between all elements,
+                'n': normal vector to input-output plane,
+                'refl': normal vector of the element,
+                'angles': half opening angle at element,
+                'xin': x-axis of the input coordinate system,
+                'yin': y-axis of the input coordinate system,
+                'xout': x-axis of the output coordinate system,
+                'yout': y-axis of the output coordinate system,
+                'R': transformation matrix between input and output coordinate systems,
+                'Ls': distances between the elements,
+                'Lrt': total roundtrip distance
+            }
+            
+    """ 
+    Nm = len(mir)
+    M = mir[:,None,:]-mir[None,:,:]
+    m = norm(M)#normal vectors connecting elements
+    
+    nraw = np.array([np.cross(m[j,j-1],m[j,(j+1)%Nm]) for j in range(Nm)]) #normal vector to in/out plane
+    msk = np.linalg.norm(nraw, axis=-1)
+    idx = np.where(msk>1e-4)[0][0] # first element with proper n
+    nraw[msk<=1e-4] = nraw[idx]
+    n = norm(nraw)
+    
+    refl_raw = np.array([0.5*(m[j,j-1]+m[j,(j+1)%Nm]) for j in range(Nm)]) #vectors normal to reflecting mirrors
+    refl_raw = [m[(j+1)%Nm,j] if np.linalg.norm(refl_raw[j])<1e-4 else refl_raw[j] for j in range(Nm)]
+    refl = -norm(refl_raw)
+    
+    angles = np.array([0.5*np.arccos(np.dot(m[j,j-1],m[j,(j+1)%Nm])) for j in range(Nm)])
+    
+    m_in = np.array([m[j,j-1] for j in range(Nm)])
+    m_out = np.array([m[j,(j+1)%Nm] for j in range(Nm)])
+    
+    xin = n
+    xout = n
+    yin = norm(np.array([np.cross(n[j],m[j,j-1]) for j in range(Nm)]))
+    yout = norm(np.array([np.cross(n[j],-m[j,(j+1)%Nm]) for j in range(Nm)]))
+    R = np.stack([np.array([[xout[i]@xin[(i+1)%Nm], yout[i]@xin[(i+1)%Nm]],\
+                            [xout[i]@yin[(i+1)%Nm], yout[i]@yin[(i+1)%Nm]]]) for i in range(Nm)], axis=0)
+    
+    #Reflect vector
+    def RefV(j, vec):
+        return vec - (vec@refl[j])*refl[j]
+    
+    changeBasisAcross = np.stack([np.array([[RefV(i,xin[i])@xout[i], RefV(i,yin[i])@xout[i]],\
+                                            [RefV(i,xin[i])@yout[i], RefV(i,yin[i])@yout[i]]]) for i in range(Nm)], axis=0)
+    
+    changeBasisAcross = np.round(changeBasisAcross) # fix slight numerical errors of the reflection  
+    #make R 4x4
+    R4 = np.zeros((R.shape[0], 4, 4))
+    for i in range(R.shape[0]):
+        m = np.identity(4)
+        r = R[i]@changeBasisAcross[i]
+        m[0:2,0:2] = r
+        m[2:4,2:4] = r
+        R4[i,:,:] = m
+    
+    Ls = [np.linalg.norm(M[j-1,j]) for j in range(Nm)]
+    Lrt = sum(Ls)
+    
+    return {'mir': mir, 'M': M, 'n': n, 'refl': refl, 'm_in': m_in, 'm_out': m_out, 'angles': angles, 'xin': xin, 'xout': xout, 'yin': yin, 'yout': yout, 'R': R4, 'Ls': Ls, 'Lrt': Lrt}
+
+def geometry_old(mir):
     """Construct a cavity geometry from mirror positions.
 
     The function is more general and can also treat other optics like lenses etc.,
@@ -60,7 +137,7 @@ def geometry(mir):
 
     return {'mir': mir, 'M': M, 'n': n, 'refl': refl, 'angles': angles, 'xin': xin, 'xout': xout, 'yin': yin, 'yout': yout, 'R': R4, 'Ls': Ls, 'Lrt': Lrt}
 
-def plot_geometry(geom, **kwargs):
+def plot_geometry(geom, scale_factor=1., arrow_length=2., **kwargs):
     """Plot cavity geometry including coordinate systems.
 
     Args:
@@ -77,15 +154,15 @@ def plot_geometry(geom, **kwargs):
     plot = k3d.plot(camera_auto_fit=True, antialias=True)
 
     col=0xff0000
-    pf = 1.
+    pf = scale_factor
     plt_line = k3d.line(pf*mir, shader='mesh', width=0.5, color=col)
     plt_line2 = k3d.line(pf*mir[(-1,0),...], shader='mesh', width=0.5, color=col)
     plot += plt_line
     plot += plt_line2
-    plot += k3d.vectors(origins=pf*mir, vectors=n*2, use_head=True, head_size=3.)#Normals = xIn = xOut
-    plot += k3d.vectors(origins=pf*mir, vectors=yin*2, use_head=True, head_size=3., color= 0xff8c00) #yIn
-    plot += k3d.vectors(origins=pf*mir, vectors=yout*2, use_head=True, head_size=3., color= 0xff8c00) #yOut
-    plot += k3d.vectors(origins=pf*mir, vectors=refl*2, use_head=True, head_size=3., color=0x00ff00)
+    plot += k3d.vectors(origins=pf*mir, vectors=n*arrow_length, use_head=True, head_size=3.)#Normals = xIn = xOut
+    plot += k3d.vectors(origins=pf*mir, vectors=yin*arrow_length, use_head=True, head_size=3., color= 0xff8c00) #yIn
+    plot += k3d.vectors(origins=pf*mir, vectors=yout*arrow_length, use_head=True, head_size=3., color= 0xff8c00) #yOut
+    plot += k3d.vectors(origins=pf*mir, vectors=refl*arrow_length, use_head=True, head_size=3., color=0x00ff00)
 
     ey = np.array([0,1,0])
     ex = np.array([1,0,0])

@@ -1,0 +1,40 @@
+name: sloppytest
+channels:
+  - bokeh
+  - pyviz
+  - conda-forge
+  - defaults
+dependencies:
+  - conda
+  - python
+  - jupyterlab<2
+  - menuinst
+  - console_shortcut
+  - powershell_shortcut
+  - conda-env
+  - conda-build
+  - conda-verify
+  - anaconda-navigator
+  - navigator-updater
+  - scipy
+  - numpy
+  - matplotlib
+  - nodejs
+  - numba
+  - joblib
+  - pylint
+  - ipympl
+  - ipywidgets
+  - k3d
+  - pyzmq
+  - panel
+  - pandas
+  - dask
+  - bottleneck
+  - holoviews
+  - bokeh
+  - hvplot
+  - qutip
+  - datashader
+  - jupyter_bokeh
+
