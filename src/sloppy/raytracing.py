@@ -3,6 +3,7 @@ from numba import jit, jitclass, njit, prange
 from numba import boolean, int32, float32, float64    # import the types
 import numba as nb
 import math
+from .abcd import *
 from .optic import *
 from .joptic import *
 
@@ -22,6 +23,20 @@ class RaySystem:
             self.screen = screen
         self.elements = elements
         self.jelements = tuple((el.jopt for el in elements)) #homogenous tuple to support jitted routines
+        
+    @property
+    def abcd(self):
+        pos = [e.p for e in self.elements]
+
+        abcd = []
+        for i, el in enumerate(self.elements):
+            d = np.linalg.norm(pos[i-1]-pos[i])
+            if isinstance(el, Glass) or isinstance(el, CurvedGlass):
+                #modify index of refraction in propagation according to Glass element
+                abcd.extend([Prop(d, n=el.n1), ABCD(el.m), ABCD(el.Rbasis)])
+            else:
+                abcd.extend([Prop(d), ABCD(el.m), ABCD(el.Rbasis)])
+        return ABCDSystem(abcd)
     
     def propagate(self, rays, Nrt=1, at_screen=False, clip=True):
         """Propagate rays through an optical system (series of elements).
@@ -223,14 +238,14 @@ class RaySystem:
         rnew = ray0.copy()
         alltols = []
         for i in range(Nmpe):
-            rconv, rseq, tols = self._find_eigenray_formpe(rnew, lr=lr, maxiter=Niter, debug=False, tol=tol*1e-1, **kwargs)
+            rconv, rseq, tols = self._find_eigenray_formpe(rnew, lr=lr, maxiter=Niter, tol=tol*1e-1, **kwargs)
             if get_tols:
                 alltols.append(tols)
             if rseq.shape[0]<4:
                 rnew = rconv
                 break
             rseq_rs = np.squeeze(rseq).reshape(-1,6).T #reshape sequence into format for MPE
-            rnew = MPE(rseq_rs) #find new starting vector
+            rnew = RaySystem.MPE(rseq_rs) #find new starting vector
             rnew = rnew.reshape(2,-1,3)
         if get_tols:
             return rnew, np.concatenate(alltraj, axis=0), np.concatenate(alltols)

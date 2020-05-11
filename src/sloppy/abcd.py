@@ -2,13 +2,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 from itertools import product
 
+
 class ABCD:
     """Base class for ABCD objects.
     In addition to the matrix it can store element properties.
 
     """
-    def __init__(self):
-        self.m = np.eye(4)
+    def __init__(self, m):
+        if m is None:
+            self.m = np.eye(4)
+        else:
+            self.m = np.array(m)
         
     def __matmul__(self, other):
         return self.m@other.m
@@ -20,7 +24,7 @@ class Prop(ABCD):
         L (float): Propagation distance.
         n (float): Index of refraction of the medium.
     """
-    def __init__(self, L, n=1):
+    def __init__(self, L, n=1.):
         # Returns the ABCD array for propagation through dielectric constant n
         self.L = L
         self.n = n
@@ -116,6 +120,7 @@ class ABCDSystem:
                 abcd=ele.m@abcd
             else:
                 abcd=ele.m@abcd
+        #print(nlist)
         abcdlist.append(abcd.copy())
         distlist.append(dtot)
         nlist.append(nlist[-1]) #TODO: Check this!
