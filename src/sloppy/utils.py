@@ -220,7 +220,7 @@ def rot_vec(v, ax, ang):
 
 def disc_coords(n_radii = 5, n_angles = 10, R=1.):
     """Return polar coordinates of the disk."""
-    radii = np.linspace(0., 1, n_radii)
+    radii = np.linspace(0., 1, n_radii, endpoint=True)
     x, y = [0], [0]
     for r in radii[1:]:
         x.extend([r*np.cos(p) for p in np.linspace(0,2*np.pi,int(2*np.pi*r*n_angles))])

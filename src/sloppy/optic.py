@@ -60,9 +60,11 @@ class Optic:
         indices = Triangulation(x,y).triangles.astype(np.uint32)
         z = np.zeros_like(x)
         mesh = k3d.mesh(np.vstack([x,y,z]).T, indices, **kwargs)
-        t, r = self.transformation
-        mesh.transform.rotation = r
-        mesh.transform.translation = t
+        #t, r = self.transformation
+        #mesh.transform.rotation = r
+        #mesh.transform.translation = t
+        mesh.transform.translation = self.p
+        mesh.transform.custom_matrix = pad3to4(self.Rot).astype(np.float32)
         return mesh  
     
     def intersect(self, ray, clip=True):
@@ -161,9 +163,8 @@ class CurvedMirror(Optic):
             z = -z
         indices = Triangulation(x,y).triangles.astype(np.uint32)
         mesh = k3d.mesh(np.vstack([x,y,z]).T, indices, **kwargs)
-        t, r = self.transformation
-        mesh.transform.rotation = r
-        mesh.transform.translation = t
+        mesh.transform.translation = self.p
+        mesh.transform.custom_matrix = pad3to4(self.Rot).astype(np.float32)
         return mesh
     
 class Glass(Optic):
@@ -226,7 +227,43 @@ class CurvedGlass(Optic):
             z = -z
         indices = Triangulation(x,y).triangles.astype(np.uint32)
         mesh = k3d.mesh(np.vstack([x,y,z]).T, indices, **kwargs)
-        t, r = self.transformation
-        mesh.transform.rotation = r
-        mesh.transform.translation = t
+        mesh.transform.translation = self.p
+        mesh.transform.custom_matrix = pad3to4(self.Rot).astype(np.float32)
         return mesh
+    
+class FreeFormMirror(Optic):
+    """Free form radially symmetric optic of the form z = \sum_i=0^deg coef[i] r**i
+    Args:
+        coef (ndarray): coefficients
+    """
+    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, Rbasis=np.eye(4), coef=np.zeros(3)):
+        super().__init__(p, n, ax, ay, diameter, Rbasis)
+        self.coef = coef
+        self.jopt = JitOptic(p=self.p, n=self.n, ax=self.ax, ay=self.ay, Rot=self.Rot, rapt=self.rapt, coef=self.coef, otype=7)
+        #TODO abcd for quadratic part?
+
+    def plot(self, n_radii = 10, n_angles = 10, **kwargs):
+        x, y = disc_coords(n_radii = n_radii, n_angles = n_angles, R=self.rapt)
+        z = np.polyval(self.coef[::-1], np.sqrt(x**2 + y**2))
+        indices = Triangulation(x,y).triangles.astype(np.uint32)
+        mesh = k3d.mesh(np.vstack([x,y,z]).T, indices, **kwargs)
+        mesh.transform.translation = self.p
+        mesh.transform.custom_matrix = pad3to4(self.Rot).astype(np.float32)
+        return mesh
+    
+class FreeFormInterface(FreeFormMirror):
+    """Free form radially symmetric optic of the form z = \sum_i=0^deg coef[i] r**i
+    Args:
+        coef (ndarray): coefficients
+    """
+    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, Rbasis=np.eye(4), coef=np.zeros(3), n1=1., n2=1.):
+        super().__init__(p, n, ax, ay, diameter, Rbasis, coef)
+        self.n1 = n1
+        self.n2 = n2
+        self.nratio = n1/n2
+        self.jopt = JitOptic(p=self.p, n=self.n, ax=self.ax, ay=self.ay, Rot=self.Rot, rapt=self.rapt, coef=self.coef, nratio=self.nratio, otype=8)
+        #TODO abcd for quadratic part?
+        m = np.identity(4)
+        m[2,2] = self.nratio
+        m[3,3] = self.nratio
+        self.m = m

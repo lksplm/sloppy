@@ -3,6 +3,7 @@ from numba import jit, jitclass, njit
 from numba import boolean, int32, float32, float64    # import the types
 import numba as nb
 import math
+from scipy.optimize import brentq
 
 #make some faster versions of core numerics
 @njit('float64(float64[:], float64[:])')
@@ -38,7 +39,8 @@ spec = [
     ('rays', float64[:,:,:]),
     ('mu', float64[:]),
     ('mus', float64[:,:]),
-    ('v', float64[:])
+    ('v', float64[:]),
+    ('coef', float64[:])
 ]
 """
 otype: Main switch to set the type of optic considered>
@@ -49,11 +51,14 @@ otype: Main switch to set the type of optic considered>
     4: flat interface (refractive index)
     5: CC concave interface
     6: CX convex interface
-    7: free form function TODO
+    7: free form function radial mirror
+    8: free form function radial interface
+    9: free form function general mirror
+    10: free form function general interface
 """
 @jitclass(spec)
 class JitOptic(object):
-    def __init__(self, p, n, ax, ay, Rot, rapt, R=0., nratio=1.0, otype=0):
+    def __init__(self, p, n, ax, ay, Rot, rapt, R=0., nratio=1.0, otype=0, coef=np.zeros(3)):
         self.rapt = rapt
         self.p = p
         self.n = n
@@ -63,6 +68,7 @@ class JitOptic(object):
         self.ay = ay
         self.Rot = Rot
         self.RotT = Rot.T
+        self.coef = coef
         
         self.otype = otype
         if self.otype == 2 or self.otype == 5: #CC
@@ -128,6 +134,28 @@ class JitOptic(object):
                 return r*np.inf
         
         return x
+    
+    def _intersect_free(self, ray, clip=True):
+        r = ray[0,:]
+        s = ray[1,:]
+        #flat intersection first for speed
+        sn = dot(s, self.n)
+        #prevent ray perpendicular to surface
+        if np.abs(sn)<=np.finfo(np.float32).eps:
+            return r*np.inf
+        t0 = dot((self.poffs - r), self.n)/sn
+        x = r + t0*s
+        if clip:
+            dist = fnorm(x - self.poffs)
+            if dist>self.rapt:
+                return r*np.inf
+        #from here free form
+        rp, sp = self.RotT@(r-self.p), self.RotT@s
+        #t = brentq(lambda t: self._free_F(rp+t*sp), 0.5*t0, 2*t0)
+        t = self.find_root(self._free_F, rp, sp, 0.5*t0, 2*t0)
+        qp = rp+t*sp
+        q = self.Rot@qp + self.p
+        return q
         
     def _propagate_flat(self, ray, clip=True):
         q = self._intersect_flat(ray, clip=clip)
@@ -158,6 +186,35 @@ class JitOptic(object):
         sp = s - 2*dot(s, n)*n
         sp = sp/fnorm(sp)
         rout = np.vstack((q, sp))
+        return rout
+    
+    def _propagate_free(self, ray, clip=True):
+        r = ray[0,:]
+        s = ray[1,:]
+        #flat intersection first for speed
+        sn = dot(s, self.n)
+        #prevent ray perpendicular to surface
+        if np.abs(sn)<=np.finfo(np.float32).eps:
+            return ray*np.inf
+        t0 = dot((self.poffs - r), self.n)/sn
+        x = r + t0*s
+        if clip:
+            dist = fnorm(x - self.poffs)
+            if dist>self.rapt:
+                return ray*np.inf
+        #from here free form
+        rp, sp = self.RotT@(r-self.p), self.RotT@s #go into local coordinates
+        #t = minimize_scalar(lambda t: abs(self._free_F(rp+t*sp)), bounds=(0.5*t0, 2*t0), tol=1e-9).x #find intersection
+        #t = brentq(lambda t: self._free_F(rp+t*sp), 0.5*t0, 2*t0)
+        t = self.find_root(self._free_F, rp, sp, 0.5*t0, 2*t0)
+        qp = rp+t*sp
+        mp = self._free_dF(qp)
+        mp = mp/fnorm(mp)
+        q = self.Rot@qp + self.p #go back into global coordinates
+        m = self.Rot@mp
+        sr = s - 2*dot(m, s)*m #reflect
+        
+        rout = np.vstack((q, sr))
         return rout
     
     def _propagate_flat_interface(self, ray, clip=True):
@@ -208,9 +265,52 @@ class JitOptic(object):
         rout = np.vstack((q, sp))
         return rout
     
+    def _propagate_free_interface(self, ray, clip=True):
+        r = ray[0,:]
+        s = ray[1,:]
+        #flat intersection first for speed
+        sn = dot(s, self.n)
+        #prevent ray perpendicular to surface
+        if np.abs(sn)<=np.finfo(np.float32).eps:
+            return ray*np.inf
+        t0 = dot((self.poffs - r), self.n)/sn
+        x = r + t0*s
+        if clip:
+            dist = fnorm(x - self.poffs)
+            if dist>self.rapt:
+                return ray*np.inf
+        #from here free form
+        rp, sp = self.RotT@(r-self.p), self.RotT@s #go into local coordinates
+        #t = minimize_scalar(lambda t: abs(self._free_F(rp+t*sp)), bounds=(0.5*t0, 2*t0), tol=1e-9).x #find intersection
+        #t = brentq(lambda t: self._free_F(rp+t*sp), 0.5*t0, 2*t0)
+        t = self.find_root(self._free_F, rp, sp, 0.5*t0, 2*t0)
+        qp = rp+t*sp
+        mp = self._free_dF(qp)
+        mp = mp/fnorm(mp)
+        q = self.Rot@qp + self.p #go back into global coordinates
+        n = self.Rot@mp #normal vector in global coords, proceed as normal
+        
+        #make sure there is always transmission and no reflection!
+        c = -dot(s, n)
+        if c>0.0: #normal case, ray is coming from medium 1 and refracted into medium 2
+            nr = self.nratio
+            dis = 1 - nr**2*(1 - c**2)#prevent total internal reflection?
+            sp = nr*s + (nr*c - math.sqrt(dis))*n
+        else: #reversed case, ray is comming from the other direction! reverse normal vec and ior ratio!
+            nr = 1.0/self.nratio
+            c = -c
+            dis = 1 - nr**2*(1 - c**2)#prevent total internal reflection?
+            sp = nr*s + (math.sqrt(dis) - nr*c)*n
+
+        sp = sp/fnorm(sp)
+        rout = np.vstack((q, sp))
+        return rout
+        
     def intersect(self, ray, clip=True):
         if self.otype == 2 or self.otype == 3 or self.otype == 5 or self.otype == 6: #Curved mirror
             return self._intersect_curv(ray, clip)
+        elif self.otype == 7 or self.otype == 8:
+            return self._intersect_free(ray, clip)
         else:
             return self._intersect_flat(ray, clip)
         
@@ -223,6 +323,10 @@ class JitOptic(object):
             return self._propagate_flat_interface(ray, clip)
         elif self.otype == 5 or self.otype == 6: #Curved interface
             return self._propagate_curv_interface(ray, clip)
+        elif self.otype == 7:
+            return self._propagate_free(ray, clip)
+        elif self.otype == 8:
+            return self._propagate_free_interface(ray, clip)
         else:
             return self._propagate_flat(ray, clip)
         
@@ -247,4 +351,95 @@ class JitOptic(object):
         """Turns 3d normal vectors from global coordinates with shape (3) into 2d slope vectors with shape (2)."""
         vss = np.dot(self.RotT, v)#rotate back to screen coords
         return vss[:-1]
+    
+    def _free_F(self, v):
+        x, y, z = v
+        r = np.sqrt(x**2 + y**2)
+        deg = len(self.coef)
+        val = 0.
+        for i in range(deg):
+            val += self.coef[i]*r**i
+        return z - val
+    
+    def _free_dF(self, v):
+        x, y, z = v
+        r = np.sqrt(x**2 + y**2)
+        deg = len(self.coef)
+        dx = 0.
+        dy = 0.
+        for i in range(1, deg):
+            dx += i*x*self.coef[i]*r**(i-2)
+            dy += i*y*self.coef[i]*r**(i-2)
+        return np.array([-dx, -dy, 1.])
+    
+    
+    def find_root(self, F, rvec, svec, a, b, t=1e-9, machep=np.finfo(np.float64).resolution, maxiter=500):
+        sa = a
+        sb = b
+        fa = F(rvec+sa*svec)#f ( sa )
+        fb = F(rvec+sb*svec)#f ( sb )
+
+        c = sa
+        fc = fa
+        e = sb - sa
+        d = e
+
+        #while ( True ):
+        for i in range(maxiter):
+            if ( abs ( fc ) < abs ( fb ) ):
+                sa = sb
+                sb = c
+                c = sa
+                fa = fb
+                fb = fc
+                fc = fa
+
+            tol = 2.0 * machep * abs ( sb ) + t
+            m = 0.5 * ( c - sb )
+            if ( abs ( m ) <= tol or fb == 0.0 ):
+                break
+
+            if ( abs ( e ) < tol or abs ( fa ) <= abs ( fb ) ):
+                e = m
+                d = e
+            else:
+                s = fb / fa
+                if ( sa == c ):
+                    p = 2.0 * m * s
+                    q = 1.0 - s
+                else:
+                    q = fa / fc
+                    r = fb / fc
+                    p = s * ( 2.0 * m * q * ( q - r ) - ( sb - sa ) * ( r - 1.0 ) )
+                    q = ( q - 1.0 ) * ( r - 1.0 ) * ( s - 1.0 )
+                if ( 0.0 < p ):
+                    q = - q
+                else:
+                    p = - p
+                s = e
+                e = d
+                if ( 2.0 * p < 3.0 * m * q - abs ( tol * q ) and p < abs ( 0.5 * s * q ) ):
+                    d = p / q
+                else:
+                    e = m
+                    d = e
+            sa = sb
+            fa = fb
+            if ( tol < abs ( d ) ):
+                sb = sb + d
+            elif ( 0.0 < m ):
+                sb = sb + tol
+            else:
+                sb = sb - tol
+
+            fb = F(rvec+sb*svec)#f ( sb )
+
+            if ( ( 0.0 < fb and 0.0 < fc ) or ( fb <= 0.0 and fc <= 0.0 ) ):
+                c = sa
+                fc = fa
+                e = sb - sa
+                d = e
+
+        value = sb
+        return value
     
