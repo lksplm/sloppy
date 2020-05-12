@@ -64,7 +64,7 @@ def GravEM(l=51.0, theta=20., axialL00 = 51.0, R=100.0):
     
     return elements
 
-def LensCav(arm1=50., arm2=55., base=19., angle=150., lens_dist=21.52449, lens_diam=6.35, lens_thick=4., Rlens=5.0):
+def LensCav_old(arm1=50., arm2=55., base=19., angle=150., lens_dist=21.52449, lens_diam=6.35, lens_thick=4., Rlens=5.0): #still needed manual fixing...
     angle = np.deg2rad(angle)
     eps = 1e-4 #hack
     p0 = np.array([lens_dist/2.-lens_thick/2.,eps,0])
@@ -105,6 +105,85 @@ def LensCav(arm1=50., arm2=55., base=19., angle=150., lens_dist=21.52449, lens_d
                 Mirror(p=ps[5], n=ns[5], ax=ax_x[5], ay=ax_y[5], Rbasis=Rtr[5], diameter=hi),\
                 CurvedGlass(p=ps[6], n=ns[6], ax=ax_x[6], ay=ax_y[6], Rbasis=Rtr[6], diameter=lens_diam, R=Rlens, curv='CX', n2=ng),\
                 Glass(p=ps[7], n=ns[7], ax=ax_x[7], ay=ax_y[7], Rbasis=Rtr[7], diameter=lens_diam, n1=ng)]
+    return elements
+
+def LensCav(arm1=50., arm2=55., base=19., angle=150., lens_dist=21.52449, lens_diam=6.35, lens_thick=4., Rlens=5.0):
+    angle = np.deg2rad(angle)
+    eps = 0. #1e-4 #hack
+    p0 = np.array([lens_dist/2.-lens_thick/2.,eps,0])
+    p1 = np.array([lens_dist/2.+lens_thick/2.,-eps,0])
+    p2 = np.array([arm1/2.,0,0])
+    p3 = np.array([np.cos(angle)*arm2/2.,base,np.sin(angle)*arm2/2.])
+    p4 = np.array([-np.cos(angle)*arm2/2.,base,-np.sin(angle)*arm2/2.])
+    p5 = np.array([-arm1/2.,0,0])
+    p6 = np.array([-lens_dist/2.-lens_thick/2.,-eps,0])
+    p7 = np.array([-lens_dist/2.+lens_thick/2.,eps,0])
+    ps = np.stack([p0,p1,p2,p3,p4,p5,p6,p7], axis=0)
+    
+    geom = geometry(ps)
+    ns = geom['refl']
+    ps = geom['mir']
+    angles = geom['angles']
+    Rtr = geom['R']
+    ax_x = geom['xin']
+    ax_y = np.cross(ns, ax_x)
+        
+    hi = 12.7
+    qi=7.75
+    ng = 1.4537
+     #negative sign of firstt cuved surface for abcd matrix
+    elements = [Glass(p=ps[0], n=ns[0], ax=ax_x[0], ay=ax_y[0], Rbasis=Rtr[0], diameter=lens_diam, n2=ng),\
+                CurvedGlass(p=ps[1], n=ns[1], ax=ax_x[1], ay=ax_y[1], Rbasis=Rtr[1], diameter=lens_diam, R=-Rlens, curv='CC', n1=ng),\
+                Mirror(p=ps[2], n=ns[2], ax=ax_x[2], ay=ax_y[2], Rbasis=Rtr[2], diameter=hi),\
+                Mirror(p=ps[3], n=ns[3], ax=ax_x[3], ay=ax_y[3], Rbasis=Rtr[3], diameter=hi),\
+                Mirror(p=ps[4], n=ns[4], ax=ax_x[4], ay=ax_y[4], Rbasis=Rtr[4], diameter=hi),\
+                Mirror(p=ps[5], n=ns[5], ax=ax_x[5], ay=ax_y[5], Rbasis=Rtr[5], diameter=hi),\
+                CurvedGlass(p=ps[6], n=ns[6], ax=ax_x[6], ay=ax_y[6], Rbasis=Rtr[6], diameter=lens_diam, R=Rlens, curv='CX', n2=ng),\
+                Glass(p=ps[7], n=ns[7], ax=ax_x[7], ay=ax_y[7], Rbasis=Rtr[7], diameter=lens_diam, n1=ng)]
+    return elements
+
+def LensCavQuartic(arm1=50., arm2=55., base=19., angle=150., lens_dist=22.15, lens_diam=6.35, lens_thick=4., Rlens=5.0, c4=0., quart_thick=1.):
+    angle = np.deg2rad(angle)
+    eps = 0. #1e-4 #hack
+    pa = np.array([lens_dist/2.-lens_thick/2.-1.-quart_thick, 0, 0])
+    pb = np.array([lens_dist/2.-lens_thick/2.-1.,-eps,0])
+    p0 = np.array([lens_dist/2.-lens_thick/2.,eps,0])
+    p1 = np.array([lens_dist/2.+lens_thick/2.,-eps,0])
+    p2 = np.array([arm1/2.,0,0])
+    p3 = np.array([np.cos(angle)*arm2/2.,base,np.sin(angle)*arm2/2.])
+    p4 = np.array([-np.cos(angle)*arm2/2.,base,-np.sin(angle)*arm2/2.])
+    p5 = np.array([-arm1/2.,0,0])
+    p6 = np.array([-lens_dist/2.-lens_thick/2.,-eps,0])
+    p7 = np.array([-lens_dist/2.+lens_thick/2.,eps,0])
+    pc = np.array([-lens_dist/2.+lens_thick/2.+1.,eps,0])
+    pd = np.array([-lens_dist/2.+lens_thick/2.+1.+quart_thick,eps,0])
+    ps = np.stack([pa,pb,p0,p1,p2,p3,p4,p5,p6,p7,pc,pd], axis=0)
+    
+    geom = geometry(ps)
+    ns = geom['refl']
+    ps = geom['mir']
+    angles = geom['angles']
+    Rtr = geom['R']
+    ax_x = geom['xin']
+    ax_y = np.cross(ns, ax_x)
+        
+    hi = 12.7
+    qi=7.75
+    ng = 1.4537
+    coef = np.zeros(5)
+    coef[4] = c4
+    elements = [FreeFormInterface(p=ps[0], n=ns[0], ax=ax_x[0], ay=ax_y[0], Rbasis=Rtr[0], diameter=lens_diam, n2=ng, coef=coef),\
+                Glass(p=ps[1], n=ns[1], ax=ax_x[1], ay=ax_y[1], Rbasis=Rtr[1], diameter=lens_diam, n1=ng),\
+                Glass(p=ps[2], n=ns[2], ax=ax_x[2], ay=ax_y[2], Rbasis=Rtr[2], diameter=lens_diam, n2=ng),\
+                CurvedGlass(p=ps[3], n=ns[3], ax=ax_x[3], ay=ax_y[3], Rbasis=Rtr[3], diameter=lens_diam, R=-Rlens, curv='CC', n1=ng),\
+                Mirror(p=ps[4], n=ns[4], ax=ax_x[4], ay=ax_y[4], Rbasis=Rtr[4], diameter=hi),\
+                Mirror(p=ps[5], n=ns[5], ax=ax_x[5], ay=ax_y[5], Rbasis=Rtr[5], diameter=hi),\
+                Mirror(p=ps[6], n=ns[6], ax=ax_x[6], ay=ax_y[6], Rbasis=Rtr[6], diameter=hi),\
+                Mirror(p=ps[7], n=ns[7], ax=ax_x[7], ay=ax_y[7], Rbasis=Rtr[7], diameter=hi),\
+                CurvedGlass(p=ps[8], n=ns[8], ax=ax_x[8], ay=ax_y[8], Rbasis=Rtr[8], diameter=lens_diam, R=Rlens, curv='CX', n2=ng),\
+                Glass(p=ps[9], n=ns[9], ax=ax_x[9], ay=ax_y[9], Rbasis=Rtr[9], diameter=lens_diam, n1=ng),\
+                Glass(p=ps[10], n=ns[10], ax=ax_x[10], ay=ax_y[10], Rbasis=Rtr[10], diameter=lens_diam, n2=ng),\
+                FreeFormInterface(p=ps[11], n=ns[11], ax=ax_x[11], ay=ax_y[11], Rbasis=Rtr[11], diameter=lens_diam, n1=ng, coef=-coef)]
     return elements
 
 def OriginalTwister(betal=31.67, R=25., Rlarge=-75., thet=20., asym = 1.25):

@@ -104,7 +104,7 @@ class RaySystem:
         Nrays = rcurs.shape[1]
         trajs = np.empty((Nrt+1, 2, Nrays, 3), dtype=np.float64)
         trajs[0,:,:,:] = rcurs
-        for k in range(Nrays):
+        for k in range(Nrays):#TODO parallelize this!
             rcur = rcurs[:,k,:]
             for i in range(Nrt):
                 for el in elements:
