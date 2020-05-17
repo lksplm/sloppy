@@ -1,4 +1,5 @@
 import numpy as np
+from math import floor
 import matplotlib.pyplot as plt
 from itertools import product
 
@@ -89,11 +90,21 @@ class ABCDSystem:
             ind.remove(j)
         return indout, evout
     
+    @staticmethod
+    def wrapAroundFSR(fsr,f):
+        return (f%(fsr/2) - (fsr/2)*(1 if floor(f/(fsr/2))%2==1 else 0))        
     
     @staticmethod
     def stability(Mrt):
-        """Stability paramter."""
-        return np.trace(Mrt)*0.5
+        """Stability parameter."""
+        # seems like maybe the second dimension gives a factor of 2? Maybe we should just use the norm of the eigenvalues
+        return np.trace(Mrt)*0.5/2
+    
+    @staticmethod
+    def stability_bool(Mrt):
+        """Is the cavity stable?."""
+        eps=0.0001
+        return all([np.abs(np.linalg.norm(eva)-1)<eps for eva in np.linalg.eigvals(Mrt)])
     
     def __init__(self, elements, wl = 780e-6):
         #unwarp possible nested elements
@@ -106,9 +117,11 @@ class ABCDSystem:
         self.wl = wl
         #build functions
         distlist=[] #cumulative distances
+        optDistlist=[] #cumulative optical distances
         abcdlist=[] #cumulative abcd matrices
         nlist = []
         dtot=0.0
+        dOptTot=0.0
         abcd=np.eye(4)
         for ele in self.elements:
             # check if ele is a propagation or other ABCD matrix
@@ -117,19 +130,24 @@ class ABCDSystem:
                 distlist.append(dtot)
                 nlist.append(ele.n)
                 dtot=dtot+ele.L
+                dOptTot=dOptTot+ele.L*ele.n
                 abcd=ele.m@abcd
             else:
                 abcd=ele.m@abcd
         #print(nlist)
         abcdlist.append(abcd.copy())
         distlist.append(dtot)
+        optDistlist.append(dOptTot)
         nlist.append(nlist[-1]) #TODO: Check this!
         
         self.abcd_rt = abcd
         self.distlist = distlist
+        self.optDistlist = optDistlist
         self.abcdlist = abcdlist
         self.nlist = nlist
         self.Ltot = dtot
+        self.LOptot = dOptTot
+        self.fsr = 2.99792458e8/(dOptTot*1e-3)
         
         self.abcd_fct = lambda x: self.abcd_from_x(x, distlist, abcdlist, nlist)
         
@@ -137,6 +155,7 @@ class ABCDSystem:
         #self.q, self.m = self.solve_mode(self.abcd_rt)
         self.q = self.M2BiK(self.abcd_rt)
         self.m = self.stability(self.abcd_rt)
+        self.is_stable = self.stability_bool(self.abcd_rt)
         #assert self.m<1 , "Mode not stable!"
         #print("No eigenmode found!")
         
@@ -157,12 +176,14 @@ class ABCDSystem:
 
     def M2freq(self, Mrt, Lrt):
         """Get transverse mode frequencies from ABCD matrix and roundtrip lentgh."""
-        fsr = 3.0e8/Lrt
+        if not self.is_stable:
+            return [np.nan, np.nan], [np.nan, np.nan]
         ev = np.linalg.eigvals(Mrt)
-        freqs = np.angle(ev)*fsr/(2*np.pi)
+        freqs = np.angle(ev)*self.fsr/(2*np.pi)
         freqsA = np.sort(freqs)[-1:-3:-1]
-        freqsB = freqsA - fsr
-        freqsC = 3.*freqsA - fsr
+        freqsB = freqsA - self.fsr
+        #freqsC = 3.*freqsA - self.fsr
+        freqsC = np.array(list(self.wrapAroundFSR(self.fsr, 3.*f) for f in freqsA))
         return freqsA, freqsC
     
     def solve_mode(self, BiK, n=1.):
@@ -170,6 +191,8 @@ class ABCDSystem:
         #BiK = ABCDSystem.M2BiK(abcd)
         #B = BiK[:2,:]
         #K = -1j*BiK[2:,:]
+        if not self.is_stable:
+            return [0, 0]
         B = BiK[:,:2]
         K = -1j*BiK[:,2:]
         #ensure normalisation
@@ -177,7 +200,7 @@ class ABCDSystem:
         lam = self.wl
         Q = np.linalg.solve(B,K) # Q = B^-1 K
         di = np.linalg.eigvals(1j*Q)
-        ws = np.sqrt(lam/(-np.pi*di.imag*n))
+        ws = np.sqrt(lam/(-n*np.pi)*((1/di.imag) if all(di.imag<0) else np.array([0, 0])))
         return ws
     
 
