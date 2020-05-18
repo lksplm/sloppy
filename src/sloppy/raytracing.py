@@ -31,7 +31,7 @@ class RaySystem:
         abcd = []
         for i, el in enumerate(self.elements):
             d = np.linalg.norm(pos[i-1]-pos[i])
-            if isinstance(el, Glass) or isinstance(el, CurvedGlass):
+            if isinstance(el, Glass) or isinstance(el, CurvedGlass) or isinstance(el, FreeFormInterface):
                 #modify index of refraction in propagation according to Glass element
                 abcd.extend([Prop(d, n=el.n1), ABCD(el.m), ABCD(el.Rbasis)])
             else:

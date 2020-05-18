@@ -241,6 +241,11 @@ class FreeFormMirror(Optic):
         self.coef = coef
         self.jopt = JitOptic(p=self.p, n=self.n, ax=self.ax, ay=self.ay, Rot=self.Rot, rapt=self.rapt, coef=self.coef, otype=7)
         #TODO abcd for quadratic part?
+        m = np.identity(4)
+        if abs(coef[2])>0.: #quadratic curvature non-zero
+            m[2,0] = -coef[2] #sagital
+            m[3,1] = -coef[2] #tangential
+        self.m = m
 
     def plot(self, n_radii = 10, n_angles = 10, **kwargs):
         x, y = disc_coords(n_radii = n_radii, n_angles = n_angles, R=self.rapt)
@@ -266,4 +271,8 @@ class FreeFormInterface(FreeFormMirror):
         m = np.identity(4)
         m[2,2] = self.nratio
         m[3,3] = self.nratio
+        if abs(coef[2])>0.: #quadratic curvature non-zero
+            R = -1./(2.*coef[2]) #WHY minus -> actually the right sign due to different deffinitions of CX/CC vs coeff
+            m[2,0] = (n1-n2)/(R*n2)
+            m[3,1] = (n1-n2)/(R*n2)
         self.m = m
