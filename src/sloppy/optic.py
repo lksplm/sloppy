@@ -262,8 +262,16 @@ class FreeFormInterface(FreeFormMirror):
         self.n2 = n2
         self.nratio = n1/n2
         self.jopt = JitOptic(p=self.p, n=self.n, ax=self.ax, ay=self.ay, Rot=self.Rot, rapt=self.rapt, coef=self.coef, nratio=self.nratio, otype=8)
-        #TODO abcd for quadratic part?
+        
         m = np.identity(4)
         m[2,2] = self.nratio
         m[3,3] = self.nratio
+        
+        # abcd for quadratic part
+        if len(coef>=3):
+            Req_inv = -2*coef[2]
+            m[2,0] = (n1-n2)/n2*Req_inv
+            m[3,1] = (n1-n2)/n2*Req_inv
+        
+        
         self.m = m

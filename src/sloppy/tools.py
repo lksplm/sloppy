@@ -6,7 +6,7 @@ from scipy.optimize import minimize, minimize_scalar
 from functools import partial
 
 #paraxial eigenmode functions
-def waists_vs_param(cavfct, parname, scanrange, N=300):
+def waists_vs_param(cavfct, parname, scanrange, N=300, degmodenum=1):
     stab = lambda m: abs(0.5*np.trace(m))<1
     La = inspect.signature(cavfct).parameters[parname].default
     Las = La + np.linspace(-scanrange*La, scanrange*La, N)
@@ -30,9 +30,10 @@ def waists_vs_param(cavfct, parname, scanrange, N=300):
             freqs[i,...] = np.concatenate(system.get_freqs())
 
     # find the degeneracy condition: smallest s-fold transverse mode splitting with a stable mode
+    degIdx=1+degmodenum
     stable_mode_mask = [all(wpair>0) for wpair in ws]
-    subset_idx = np.argmin(np.abs(freqs[:,2][stable_mode_mask]))
-    idx = np.arange(np.abs(freqs[:,2]).shape[0])[stable_mode_mask][subset_idx] 
+    subset_idx = np.argmin(np.abs(freqs[:,degIdx][stable_mode_mask]))
+    idx = np.arange(np.abs(freqs[:,degIdx]).shape[0])[stable_mode_mask][subset_idx] 
     
     g, ax = plt.subplots(ncols=2, figsize=(8,4))
     ax[0].plot(Las, ws*1e3)
@@ -46,13 +47,14 @@ def waists_vs_param(cavfct, parname, scanrange, N=300):
     Ldeg = Las[idx]
     return Ldeg
 
-def degeneracy_length(cavfct, parname, scanrange=1e-3):
+def degeneracy_length(cavfct, parname, scanrange=1e-3, degmodenum=1):
     def get_freq(l):
         elements = cavfct(**{parname: l})
         sys = RaySystem(elements)
         system = sys.abcd
         freqs = np.concatenate(system.get_freqs())
-        return abs(freqs[2])**2 #which frequency to select!
+        degIdx=1+degmodenum
+        return abs(freqs[degIdx])**2 #which frequency to select!
     
     La = inspect.signature(cavfct).parameters[parname].default
     res = minimize_scalar(get_freq, bounds=((1-scanrange)*La, (1+scanrange)*La), method='bounded')
