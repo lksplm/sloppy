@@ -1,4 +1,5 @@
 import numpy as np
+from math import floor
 import matplotlib.pyplot as plt
 from itertools import product
 
@@ -89,7 +90,7 @@ class ABCDSystem:
     
     @staticmethod
     def get_conj_pairs(ev):
-        """Get both conjugate eigen pairs with the right normalization."""
+        """Get the conjugate eigenvectors with the right normalization."""
         ind = [0, 1, 2, 3]
         indout = []
         evout = []
@@ -103,11 +104,21 @@ class ABCDSystem:
             ind.remove(j)
         return indout, evout
     
+    @staticmethod
+    def wrapAroundFSR(fsr,f):
+        return (f%(fsr/2) - (fsr/2)*(1 if floor(f/(fsr/2))%2==1 else 0))        
     
     @staticmethod
     def stability(Mrt):
-        """Stability paramter."""
-        return np.trace(Mrt)*0.5
+        """Stability parameter."""
+        # seems like maybe the second dimension gives a factor of 2? Maybe we should just use the norm of the eigenvalues
+        return np.trace(Mrt)*0.5/2
+    
+    @staticmethod
+    def stability_bool(Mrt):
+        """Is the cavity stable?."""
+        eps=0.0001
+        return all([np.abs(np.linalg.norm(eva)-1)<eps for eva in np.linalg.eigvals(Mrt)])
     
     @staticmethod
     def wrap_fsr(f, fsr):
@@ -124,9 +135,11 @@ class ABCDSystem:
         self.wl = wl
         #build functions
         distlist=[] #cumulative distances
+        optDistlist=[] #cumulative optical distances
         abcdlist=[] #cumulative abcd matrices
         nlist = []
         dtot=0.0
+        dOptTot=0.0
         abcd=np.eye(4)
         for ele in self.elements:
             # check if ele is a propagation or other ABCD matrix
@@ -135,19 +148,24 @@ class ABCDSystem:
                 distlist.append(dtot)
                 nlist.append(ele.n)
                 dtot=dtot+ele.L
+                dOptTot=dOptTot+ele.L*ele.n
                 abcd=ele.m@abcd
             else:
                 abcd=ele.m@abcd
-        #print(nlist)
+
         abcdlist.append(abcd.copy())
         distlist.append(dtot)
+        optDistlist.append(dOptTot)
         nlist.append(nlist[-1]) #TODO: Check this!
         
         self.abcd_rt = abcd
         self.distlist = distlist
+        self.optDistlist = optDistlist
         self.abcdlist = abcdlist
         self.nlist = nlist
         self.Ltot = dtot
+        self.LOptot = dOptTot
+        self.fsr = 2.99792458e8/(dOptTot*1e-3)
         
         self.abcd_fct = lambda x: self.abcd_from_x(x, distlist, abcdlist, nlist)
         
@@ -155,50 +173,56 @@ class ABCDSystem:
         #self.q, self.m = self.solve_mode(self.abcd_rt)
         self.q = self.M2BiK(self.abcd_rt)
         self.m = self.stability(self.abcd_rt)
+        self.is_stable = self.stability_bool(self.abcd_rt)
         #assert self.m<1 , "Mode not stable!"
         #print("No eigenmode found!")
         
     def M2BiK(self, Mrt):
         """Get eigenvectors from ABCD matrix and normalize."""
+        # choose properly normalized pair if we can
         G = np.array([[0,0,1,0], [0,0,0,1], [-1,0,0,0], [0,-1,0,0]])
-        ev, evec = np.linalg.eig(Mrt)
-        ind, es = ABCDSystem.get_conj_pairs(ev)
-        #print(ev, ind, es)
-        mus = evec[:,ind]
-        xsi = np.angle(es)
-        N = [mus[:,i].T.conj()@G@mus[:,i] for i in range(2)]
-        musN = np.stack([mus[:,i]*np.sqrt(2/N[i]) for i in range(2)], axis=0)
-        NN = [musN[i].T.conj()@G@musN[i] for i in range(2)]
-        #print(NN)
-        return musN
+        ev, mus = np.linalg.eig(Mrt)
+        nn0 = [mus[:,i].T.conj()@G@mus[:,i] for i in range(len(mus))]
+        if any([ ni == 0 for ni in nn0]):
+            nn0 = np.array([1,1,1,1])
+        musN = [mus[:,i]*np.sqrt(2/nn0[i]) for i in range(len(mus))]
+        nn1 = np.array([musN[i].T.conj()@G@musN[i] for i in range(len(musN))])
+        goodIdx = [np.abs((ni-(-2j)))<0.0001 for ni in nn1]
+        if np.sum(goodIdx)==2:
+            return np.array(musN)[goodIdx]
+        else:   # But if unstable or some weird numerics or something,....
+            ind, es = ABCDSystem.get_conj_pairs(ev)
+            mus = mus[:,ind]
+            N = [mus[:,i].T.conj()@G@mus[:,i] for i in range(2)]
+            if any([ Ni == 0 for Ni in N]):
+                N = np.ones(np.shape(N))
+            musN = np.stack([mus[:,i]*np.sqrt(2/N[i]) for i in range(2)], axis=0)
+            return musN
     
 
-    def M2freq(self, Mrt, Lrt, s=3):
+    def M2freq(self, Mrt, s=3):
         """Get transverse mode frequencies from ABCD matrix and roundtrip lentgh."""
-        fsr = 3.0e11/Lrt #in mm/sec !  3.0e8/Lrt
+        if not self.is_stable:
+            return [np.nan, np.nan], [np.nan, np.nan]
         ev = np.linalg.eigvals(Mrt)
-        freqs = np.angle(ev)*fsr/(2*np.pi)
+        freqs = np.angle(ev)*self.fsr/(2*np.pi)
         freqsA = np.sort(freqs)[-1:-3:-1]
         #freqsB = freqsA - fsr
-        freqsC = ABCDSystem.wrap_fsr(s*freqsA, fsr)#3.*freqsA - fsr
+        freqsC = ABCDSystem.wrap_fsr(s*freqsA, fsr) #same as matts version, only vectorized freqsC = np.array(list(self.wrapAroundFSR(self.fsr, 3.*f) for f in freqsA))
         return freqsA, freqsC
     
     def solve_mode(self, BiK, n=1.):
         """Get waists (diagonal) from eigenvectors."""
-        #BiK = ABCDSystem.M2BiK(abcd)
-        #B = BiK[:2,:]
-        #K = -1j*BiK[2:,:]
+        if not self.is_stable:
+            return [0, 0]
         B = BiK[:,:2]
         K = -1j*BiK[:,2:]
-        #ensure normalisation
-        #print(K@(B.T.conj()) + B@(K.T.conj()))
         lam = self.wl
         Q = np.linalg.solve(B,K) # Q = B^-1 K
         di = np.linalg.eigvals(1j*Q)
-        ws = np.sqrt(lam/(-np.pi*di.imag*n))
+        ws = np.sqrt(lam/(-n*np.pi)*((1/di.imag) if all(di.imag!=0) else np.array([0, 0])))
         return ws
     
-
     def propBiK(self, BiK, M):
         """Propagate eigenvector matrix BiK with ABCD matrix M."""
         BiKz = BiK@M.T
@@ -233,11 +257,7 @@ class ABCDSystem:
         self.propBiK(self.q, self.abcd_at(x))
         
     def get_freqs(self, s=3):
-        return self.M2freq(self.abcd_rt, self.Ltot, s)
-    
-    @property
-    def fsr(self):
-        return 3.0e11/self.Ltot
+        return self.M2freq(self.abcd_rt, s=s)
     
 def propagate_ABCD(mu, M, Nrt=100):
     rs = np.empty((Nrt+1,4))

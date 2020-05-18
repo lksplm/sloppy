@@ -39,15 +39,23 @@ def geometry(mir):
     
     nraw = np.array([np.cross(m[j,j-1],m[j,(j+1)%Nm]) for j in range(Nm)]) #normal vector to in/out plane
     msk = np.linalg.norm(nraw, axis=-1)
-    idx = np.where(msk>1e-4)[0][0] # first element with proper n
-    nraw[msk<=1e-4] = nraw[idx]
+
+    # set normal vector for in-line optics to the previous normal vector
+    def go_n_Prev(j):
+        if np.linalg.norm(nraw[(j-1)%Nm]>1e-4):
+            return nraw[(j-1)%Nm]
+        else:
+            return go_n_Prev(j-1)
+    for j in range(Nm):
+        if msk[j]<1e-4:
+            nraw[j]=go_n_Prev(j)
     n = norm(nraw)
     
     refl_raw = np.array([0.5*(m[j,j-1]+m[j,(j+1)%Nm]) for j in range(Nm)]) #vectors normal to reflecting mirrors
     refl_raw = [m[(j+1)%Nm,j] if np.linalg.norm(refl_raw[j])<1e-4 else refl_raw[j] for j in range(Nm)]
     refl = -norm(refl_raw)
     
-    angles = np.array([0.5*np.arccos(np.dot(m[j,j-1],m[j,(j+1)%Nm])) for j in range(Nm)])
+    angles = np.array([0.5*np.arccos(0.999999*np.dot(m[j,j-1],m[j,(j+1)%Nm])) for j in range(Nm)]) # prevents error with range of np.arccos()
     
     m_in = np.array([m[j,j-1] for j in range(Nm)])
     m_out = np.array([m[j,(j+1)%Nm] for j in range(Nm)])

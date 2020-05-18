@@ -267,12 +267,13 @@ class FreeFormInterface(FreeFormMirror):
         self.n2 = n2
         self.nratio = n1/n2
         self.jopt = JitOptic(p=self.p, n=self.n, ax=self.ax, ay=self.ay, Rot=self.Rot, rapt=self.rapt, coef=self.coef, nratio=self.nratio, otype=8)
-        #TODO abcd for quadratic part?
+        
         m = np.identity(4)
         m[2,2] = self.nratio
         m[3,3] = self.nratio
+
         if abs(coef[2])>0.: #quadratic curvature non-zero
-            R = -1./(2.*coef[2]) #WHY minus -> actually the right sign due to different deffinitions of CX/CC vs coeff
-            m[2,0] = (n1-n2)/(R*n2)
-            m[3,1] = (n1-n2)/(R*n2)
+            Req_inv = -2*coef[2] #WHY minus -> actually the right sign due to different deffinitions of CX/CC vs coeff
+            m[2,0] = (n1-n2)/n2*Req_inv
+            m[3,1] = (n1-n2)/n2*Req_inv
         self.m = m
