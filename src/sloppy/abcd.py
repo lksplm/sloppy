@@ -32,6 +32,20 @@ class Prop(ABCD):
         m[0,2] = L
         m[1,3] = L
         self.m = m
+        
+    def _aberrations(self, chi):
+        #shape of chi is (4, N, N)
+        x, y, sx, sy = chi
+        sx2, sy2 = sx@sx, sy@sy
+        sx2psy2 = sx2+sy2
+        nonP4 = -self.dist*k/8*(sx2psy2@sx2psy2)
+        nonP6 = -self.dist*k/16*(sx2psy2@sx2psy2@sx2psy2)
+        #nonP8 = -5*self.dist*k/128*(sx2psy2@sx2psy2@sx2psy2@sx2psy2)
+        
+        return [nonP4, nonP6] #nonP6, nonP8 
+        
+    def aberration(self, chi):
+        return sum(self._aberrations(chi))
 
 class Rot(ABCD):
     """Coordinate transformation through rotation.
