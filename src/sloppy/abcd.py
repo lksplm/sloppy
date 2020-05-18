@@ -95,6 +95,10 @@ class ABCDSystem:
         """Stability paramter."""
         return np.trace(Mrt)*0.5
     
+    @staticmethod
+    def wrap_fsr(f, fsr):
+        return np.mod(f,0.5*fsr) - 0.5*fsr*np.where(np.floor(2.*f/fsr)%2==1, 1, 0)
+    
     def __init__(self, elements, wl = 780e-6):
         #unwarp possible nested elements
         self.elements = []
@@ -155,14 +159,14 @@ class ABCDSystem:
         return musN
     
 
-    def M2freq(self, Mrt, Lrt):
+    def M2freq(self, Mrt, Lrt, s=3):
         """Get transverse mode frequencies from ABCD matrix and roundtrip lentgh."""
-        fsr = 3.0e8/Lrt
+        fsr = 3.0e11/Lrt #in mm/sec !  3.0e8/Lrt
         ev = np.linalg.eigvals(Mrt)
         freqs = np.angle(ev)*fsr/(2*np.pi)
         freqsA = np.sort(freqs)[-1:-3:-1]
-        freqsB = freqsA - fsr
-        freqsC = 3.*freqsA - fsr
+        #freqsB = freqsA - fsr
+        freqsC = ABCDSystem.wrap_fsr(s*freqsA, fsr)#3.*freqsA - fsr
         return freqsA, freqsC
     
     def solve_mode(self, BiK, n=1.):
@@ -214,8 +218,12 @@ class ABCDSystem:
     def q_at(self, x):
         self.propBiK(self.q, self.abcd_at(x))
         
-    def get_freqs(self):
-        return self.M2freq(self.abcd_rt, self.Ltot)
+    def get_freqs(self, s=3):
+        return self.M2freq(self.abcd_rt, self.Ltot, s)
+    
+    @property
+    def fsr(self):
+        return 3.0e11/self.Ltot
     
 def propagate_ABCD(mu, M, Nrt=100):
     rs = np.empty((Nrt+1,4))
