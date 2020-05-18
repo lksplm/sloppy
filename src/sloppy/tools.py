@@ -7,21 +7,21 @@ from functools import partial
 from ipywidgets import Layout, IntSlider, FloatLogSlider, FloatSlider, interactive, fixed
 
 #paraxial eigenmode functions
-def degeneracy_length(cavfct, parname, scanrange=1e-3, s=3):
+def degeneracy_length(cavfct, parname, scanrange=1e-3, s=3, degmodenum=0):
     """
-    Finds the degeneracy of the cavity cavfct as a function of parname for frequency freqs[which] (which=2 for s=3) #TODO refine for arbitrary s and transverse mode
+    Finds the degeneracy of the cavity cavfct as a function of parname for frequency freqs[degmodenum] and s-fold degeneracy
     """
     def get_freq(l):
         elements = cavfct(**{parname: l})
         sys = RaySystem(elements)
         system = sys.abcd
         freqs = np.concatenate(system.get_freqs(s=s))
-        return abs(freqs[2])**2 #which frequency to select!
+        degIdx=2+degmodenum
+        return abs(freqs[degIdx])**2 #which frequency to select!
     
     La = inspect.signature(cavfct).parameters[parname].default
     res = minimize_scalar(get_freq, bounds=((1-scanrange)*La, (1+scanrange)*La), method='bounded')
     return res
-
 
 def cavity_parameter_interaction_factory(cavfct, parname, scanrange, N = 300):
     fig, ax = plt.subplots(ncols=2, figsize=(8,4), sharex=True)
@@ -81,7 +81,8 @@ def cavity_parameter_interaction_factory(cavfct, parname, scanrange, N = 300):
     sliders.update({'scanrange': FloatLogSlider(value=scanrange, min=-3, max=1, step=0.5, layout=lo)})
     return interactive(update_waists_vs_params, cavfct=fixed(cavfct), parname = fixed('lens_dist'), N=fixed(N), **sliders)
 
-def waists_vs_param(cavfct, parname, scanrange, N = 300):
+
+def waists_vs_param(cavfct, parname, scanrange, N=300, degmodenum=1):
     stab = lambda m: abs(0.5*np.trace(m))<1
     La = inspect.signature(cavfct).parameters[parname].default
     Las = La + np.linspace(-scanrange*La, scanrange*La, N)
@@ -104,7 +105,12 @@ def waists_vs_param(cavfct, parname, scanrange, N = 300):
             ws[i,:] = np.sort(w)
             freqs[i,...] = np.concatenate(system.get_freqs())
 
-    idx = np.argmin(np.abs(freqs[:,2]))
+    # find the degeneracy condition: smallest s-fold transverse mode splitting with a stable mode
+    degIdx=1+degmodenum
+    stable_mode_mask = [all(wpair>0) for wpair in ws]
+    subset_idx = np.argmin(np.abs(freqs[:,degIdx][stable_mode_mask]))
+    idx = np.arange(np.abs(freqs[:,degIdx]).shape[0])[stable_mode_mask][subset_idx] 
+    
     g, ax = plt.subplots(ncols=2, figsize=(8,4))
     ax[0].plot(Las, ws*1e3)
     ax[0].set_ylabel('um')
