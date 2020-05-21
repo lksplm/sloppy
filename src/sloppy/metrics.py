@@ -474,7 +474,7 @@ def metrics_interaction_factory(cavfct, cavpars, rmax=12., Nplt=100, slrng=(0.8,
     return interactive(update, scalings=fixed(scalings), a=a, b=b, **sliders)
 
 #Optimization routines
-def metric_optim(x, metr, cavfct, cavpars, rmax=10., Nplt=100, degmodenum=1)
+def metric_optim(x, metr, cavfct, cavpars, rmax=10., Nplt=100, degmodenum=1):
     """wrapper function for optimization"""
     cavpars.update({'c4': x[0], 'c6': x[1]})
     rs, ds = metric_over_r(metric=metr, cavfct=cavfct, cavpars=cavpars, rmax=rmax, Nplt=Nplt, degmodenum=degmodenum)
