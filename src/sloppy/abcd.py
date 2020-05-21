@@ -34,19 +34,17 @@ class Prop(ABCD):
         m[1,3] = L
         self.m = m
         
-    def _aberrations(self, chi):
+    def aberrations(self, chi, k):
         #shape of chi is (4, N, N)
         x, y, sx, sy = chi
         sx2, sy2 = sx@sx, sy@sy
         sx2psy2 = sx2+sy2
-        nonP4 = -self.dist*k/8*(sx2psy2@sx2psy2)
-        nonP6 = -self.dist*k/16*(sx2psy2@sx2psy2@sx2psy2)
+        sx2psy2_2 = sx2psy2@sx2psy2
+        nonP4 = -self.L*k/8*(sx2psy2_2)
+        nonP6 = -self.L*k/16*(sx2psy2_2@sx2psy2)
         #nonP8 = -5*self.dist*k/128*(sx2psy2@sx2psy2@sx2psy2@sx2psy2)
         
-        return [nonP4, nonP6] #nonP6, nonP8 
-        
-    def aberration(self, chi):
-        return sum(self._aberrations(chi))
+        return sum([nonP4, nonP6]) #nonP6, nonP8 
 
 class Rot(ABCD):
     """Coordinate transformation through rotation.
@@ -117,8 +115,9 @@ class ABCDSystem:
     @staticmethod
     def stability_bool(Mrt):
         """Is the cavity stable?."""
-        eps=0.0001
-        return all([np.abs(np.linalg.norm(eva)-1)<eps for eva in np.linalg.eigvals(Mrt)])
+        eps=0.001
+        #return all([np.abs(np.linalg.norm(eva)-1)<eps for eva in np.linalg.eigvals(Mrt)])
+        return all([(np.abs(eva)-1)<eps for eva in np.linalg.eigvals(Mrt)])
     
     @staticmethod
     def wrap_fsr(f, fsr):
@@ -133,9 +132,10 @@ class ABCDSystem:
             else:
                 self.elements.append(ele)
         self.wl = wl
+        self.k = 2*np.pi/wl
         #build functions
         distlist=[] #cumulative distances
-        optDistlist=[] #cumulative optical distances
+        #optDistlist=[] #cumulative optical distances
         abcdlist=[] #cumulative abcd matrices
         nlist = []
         dtot=0.0
@@ -155,12 +155,12 @@ class ABCDSystem:
 
         abcdlist.append(abcd.copy())
         distlist.append(dtot)
-        optDistlist.append(dOptTot)
+        #optDistlist.append(dOptTot)
         nlist.append(nlist[-1]) #TODO: Check this!
         
         self.abcd_rt = abcd
         self.distlist = distlist
-        self.optDistlist = optDistlist
+        #self.optDistlist = optDistlist
         self.abcdlist = abcdlist
         self.nlist = nlist
         self.Ltot = dtot
@@ -173,6 +173,7 @@ class ABCDSystem:
         #self.q, self.m = self.solve_mode(self.abcd_rt)
         self.q = self.M2BiK(self.abcd_rt)
         self.m = self.stability(self.abcd_rt)
+        #self.is_stable = np.abs(self.stability(self.abcd_rt))<1.
         self.is_stable = self.stability_bool(self.abcd_rt)
         #assert self.m<1 , "Mode not stable!"
         #print("No eigenmode found!")
@@ -198,7 +199,26 @@ class ABCDSystem:
                 N = np.ones(np.shape(N))
             musN = np.stack([mus[:,i]*np.sqrt(2/N[i]) for i in range(2)], axis=0)
             return musN
-    
+        
+    def M2waistNew(self, Mrt):
+        ev, mus = np.linalg.eig(Mrt)
+        G = np.array([[0,0,1,0], [0,0,0,1], [-1,0,0,0], [0,-1,0,0]])
+        #Normalize the eigenvectors and take the ones that are normalized to -2j
+        N = [mus[:,i].T.conj()@G@mus[:,i] for i in range(4)]
+        musN = np.stack([mus[:,i]*np.sqrt(2/N[i]) for i in range(4)], axis=1)
+        N = np.array([musN[:,i].T.conj()@G@musN[:,i] for i in range(4)])
+        #print(N)
+        idx = np.where(np.abs(N.imag+2)<1e-5)[0]
+        idx = idx[::-1]
+        musN = musN[:,idx]
+        #Build B and K matrix, this is very sensitive! Double check again, see https://journals.aps.org/pra/pdf/10.1103/PhysRevA.75.033819
+        B = np.array([[ musN[0,0], musN[1,0] ],[ musN[0,1], musN[1,1] ]])
+        K = -1j*np.array([[ musN[2,0], musN[3,0] ],[ musN[2,1], musN[3,1] ]])
+        # Q = B^-1 K
+        Q = np.linalg.solve(B,K) 
+        di = np.linalg.eigvals(1j*Q)
+        ws = np.sqrt(self.wl/(-n*np.pi)*((1/di.imag) if all(di.imag!=0) else np.array([np.nan, np.nan])))
+        return {'ws': ws, 'B': B, 'K': K, 'Q': Q, 'mu': musN}
 
     def M2freq(self, Mrt, s=3):
         """Get transverse mode frequencies from ABCD matrix and roundtrip lentgh."""
@@ -208,7 +228,7 @@ class ABCDSystem:
         freqs = np.angle(ev)*self.fsr/(2*np.pi)
         freqsA = np.sort(freqs)[-1:-3:-1]
         #freqsB = freqsA - fsr
-        freqsC = ABCDSystem.wrap_fsr(s*freqsA, fsr) #same as matts version, only vectorized freqsC = np.array(list(self.wrapAroundFSR(self.fsr, 3.*f) for f in freqsA))
+        freqsC = ABCDSystem.wrap_fsr(s*freqsA, self.fsr) #same as matts version, only vectorized freqsC = np.array(list(self.wrapAroundFSR(self.fsr, 3.*f) for f in freqsA))
         return freqsA, freqsC
     
     def solve_mode(self, BiK, n=1.):
@@ -220,7 +240,7 @@ class ABCDSystem:
         lam = self.wl
         Q = np.linalg.solve(B,K) # Q = B^-1 K
         di = np.linalg.eigvals(1j*Q)
-        ws = np.sqrt(lam/(-n*np.pi)*((1/di.imag) if all(di.imag!=0) else np.array([0, 0])))
+        ws = np.sqrt(lam/(-n*np.pi)*((1/di.imag) if all(di.imag!=0) else np.array([np.nan, np.nan])))
         return ws
     
     def propBiK(self, BiK, M):
@@ -258,6 +278,27 @@ class ABCDSystem:
         
     def get_freqs(self, s=3):
         return self.M2freq(self.abcd_rt, s=s)
+    
+    def make_realspace(self, a=5., b=None, N=200):
+        if b is None:
+            b=a
+        ws = self.waist_at(0)
+        xx=np.linspace(-a*ws[0], a*ws[0], N)
+        dx = xx[1]-xx[0]
+        yy=np.linspace(-b*ws[1], b*ws[1], N)
+        dy = yy[1]-y[0]
+        x, y = np.meshgrid(xx,yy, indexing='ij')
+        r = np.dstack([x,y])
+        self.r = r
+    
+    @staticmethod
+    def chi_wf(phi, k):
+        pdx = np.gradient(phi, dx, axis=0)
+        pdy = np.gradient(phi, dx, axis=1)
+        px = phi*x
+        py = phi*y
+        return np.stack([px, py, 1j*pdx/k, 1j*pdy/k], axis=0)
+
     
 def propagate_ABCD(mu, M, Nrt=100):
     rs = np.empty((Nrt+1,4))

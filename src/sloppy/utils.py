@@ -46,9 +46,17 @@ def geometry(mir):
             return nraw[(j-1)%Nm]
         else:
             return go_n_Prev(j-1)
+        
+    # set normal vector for in-line optics to the next normal vector
+    def go_n_Next(j):
+        if np.linalg.norm(nraw[(j+1)%Nm]>1e-4):
+            return nraw[(j+1)%Nm]
+        else:
+            return go_n_Next(j+1)
+        
     for j in range(Nm):
         if msk[j]<1e-4:
-            nraw[j]=go_n_Prev(j)
+            nraw[j]=go_n_Next(j)
     n = norm(nraw)
     
     refl_raw = np.array([0.5*(m[j,j-1]+m[j,(j+1)%Nm]) for j in range(Nm)]) #vectors normal to reflecting mirrors
