@@ -6,8 +6,22 @@ from scipy.optimize import minimize, minimize_scalar
 from functools import partial
 from ipywidgets import Layout, IntSlider, FloatLogSlider, FloatSlider, interactive, fixed
 
+magnitude = lambda x: 1. if x==0. else int(np.floor(np.log10(x)))
+
+def waist_vs_l(cavfct, cavpars, Npts=500):
+    elements = cavfct(**cavpars)
+    sys = RaySystem(elements)
+
+    system = sys.abcd
+    x = np.linspace(0, system.Ltot, 500)
+    ws = system.compute_waists(x)
+
+    plt.figure()
+    plt.plot(x, ws)
+    plt.show()
+
 #paraxial eigenmode functions
-def degeneracy_length(cavfct, parname, scanrange=1e-3, s=3, degmodenum=0):
+def degeneracy_length(cavfct, parname, scanrange=1e-3, s=3, degmodenum=1):
     """
     Finds the degeneracy of the cavity cavfct as a function of parname for frequency freqs[degmodenum] and s-fold degeneracy
     """
@@ -16,7 +30,7 @@ def degeneracy_length(cavfct, parname, scanrange=1e-3, s=3, degmodenum=0):
         sys = RaySystem(elements)
         system = sys.abcd
         freqs = np.concatenate(system.get_freqs(s=s))
-        degIdx=2+degmodenum
+        degIdx=1+degmodenum
         return abs(freqs[degIdx])**2 #which frequency to select!
     
     La = inspect.signature(cavfct).parameters[parname].default
@@ -33,8 +47,6 @@ def cavity_parameter_interaction_factory(cavfct, parname, scanrange, N = 300):
     axv0 = ax[0].axvline(0, color='grey')
     axv1 = ax[1].axvline(0, color='grey')
     plt.show()
-    
-    magnitude = lambda x: int(np.floor(np.log10(x)))
     
     def update_waists_vs_params(cavfct, parname, scanrange, N = 300, **kwargs):
         stab = lambda m: abs(0.5*np.trace(m))<1
@@ -107,9 +119,10 @@ def waists_vs_param(cavfct, parname, scanrange, N=300, degmodenum=1):
 
     # find the degeneracy condition: smallest s-fold transverse mode splitting with a stable mode
     degIdx=1+degmodenum
-    stable_mode_mask = [all(wpair>0) for wpair in ws]
-    subset_idx = np.argmin(np.abs(freqs[:,degIdx][stable_mode_mask]))
-    idx = np.arange(np.abs(freqs[:,degIdx]).shape[0])[stable_mode_mask][subset_idx] 
+    #stable_mode_mask = [all(wpair>0) for wpair in ws]
+    #subset_idx = np.argmin(np.abs(freqs[:,degIdx][stable_mode_mask]))
+    #idx = np.arange(np.abs(freqs[:,degIdx]).shape[0])[stable_mode_mask][subset_idx] 
+    idx = np.argmin(np.abs(freqs[:,degIdx]))
     
     g, ax = plt.subplots(ncols=2, figsize=(8,4))
     ax[0].plot(Las, ws*1e3)
@@ -139,7 +152,7 @@ def rays_interaction_factory(cavfct, parname, scanrange=1e-2, rmax=6.):
     def makeidx(hit_m):
         return np.arange(hit_m.shape[0])
     
-    magnitude = lambda x: int(np.floor(np.log10(x)))
+    magnitude = lambda x: 1. if x==0. else int(np.floor(np.log10(x)))
     
     def update(ar=0.0, br=0.0, ap=0., bp=0., Nrt=500, **kwargs):
         #kwargs.update({parname: Ldeg+dl*1e-1})
@@ -196,3 +209,125 @@ def rays_interaction_factory(cavfct, parname, scanrange=1e-2, rmax=6.):
     raysliders = {'ar': ars, 'br': brs, 'ap': aps, 'bp': bps, 'Nrt': Nrts}
     sliders.update(**raysliders)
     return interactive(update, **sliders)
+
+"""
+Helper functions to find coefficients/parameters for minimum deviation of the ray
+"""
+coeffc2 = lambda x: 1./(2*x)
+coeffc4 = lambda x: 1./(8*x**3)
+coeffc6 = lambda x: 1./(16*x**5)
+coeffc8 = lambda x: 5./(128*x**7)
+
+def degeneracy_length_ray(cavfct, parname, r=0, scanrange=1e-3, degmodenum=1, La=None, Nrt=30, **kwargs):
+    def get_dev(l, r, arg):
+        kwargs=arg.copy()
+        kwargs.update({parname: l})
+        elements = cavfct(**kwargs)
+        sys = RaySystem(elements)
+        system = sys.abcd
+        mu1, mu2 = system.q
+        waist = system.waist_at(0)[0]
+        mu = mu1 if degmodenum==1 else mu2
+        rmu = np.linalg.norm(np.real(mu[:2]))
+        mu = np.real(r*waist/rmu*mu)
+        ray0 = sys.screen.eigenvectors_to_rays(mu)
+        traj_hit = sys.propagate(ray0, Nrt=Nrt, at_screen=True)
+        hit_scr = sys.screen.r_to_screen_coords(traj_hit[:,0,0,:])
+        hit_1 = hit_scr[::3,:]
+        hit_2 = hit_scr[1::3,:]
+        hit_3 = hit_scr[2::3,:]
+        #approximate path length described by dots through piecwise linear distance
+        dev = np.linalg.norm(hit_1[1:,:]-hit_1[:-1,:], axis=1).sum() +\
+                np.linalg.norm(hit_2[1:,:]-hit_2[:-1,:], axis=1).sum() +\
+                np.linalg.norm(hit_3[1:,:]-hit_3[:-1,:], axis=1).sum()
+        return dev
+    if La is None:
+        La = inspect.signature(cavfct).parameters[parname].default
+    extrargs = kwargs.copy()
+    res = minimize_scalar(get_dev, bounds=((1-scanrange)*La, (1+scanrange)*La), args=(r, extrargs), method='bounded')
+    return res
+
+def coefficients_interaction_factory(cavfct, degmodenum=1, coefpars = {'c4': coeffc4(5.0)}, negative=True, rmax=12., Nplt=100, Nrt=30):
+    magnitude = lambda x: int(np.floor(np.log10(x)))
+    
+    def get_dev(r, **kwargs):
+        elements = cavfct(**kwargs)
+        sys = RaySystem(elements)
+        system = sys.abcd
+        mu1, mu2 = system.q
+        waist = system.waist_at(0)[0]
+        mu = mu1 if degmodenum==1 else mu2
+        rmu = np.linalg.norm(np.real(mu[:2]))
+        mu = np.real(r*waist/rmu*mu)
+        ray0 = sys.screen.eigenvectors_to_rays(mu)
+        traj_hit = sys.propagate(ray0, Nrt=Nrt, at_screen=True)
+        hit_scr = sys.screen.r_to_screen_coords(traj_hit[:,0,0,:])
+        hit_1 = hit_scr[::3,:]
+        hit_2 = hit_scr[1::3,:]
+        hit_3 = hit_scr[2::3,:]
+        #approximate path length described by dots through piecwise linear distance
+        dev = np.linalg.norm(hit_1[1:,:]-hit_1[:-1,:], axis=1).sum() +\
+                np.linalg.norm(hit_2[1:,:]-hit_2[:-1,:], axis=1).sum() +\
+                np.linalg.norm(hit_3[1:,:]-hit_3[:-1,:], axis=1).sum()
+        return dev
+
+    fig, ax = plt.subplots()
+    line = ax.plot([], [])[0]
+    plt.title('Deviation vs radius')
+    plt.xlabel(r'$r_{in}$ [waists]')
+    plt.ylabel(r'$dev$ [mm]')
+    plt.show()
+    
+    #Because the coefficients for aspheres/waveplates get super small, there is some rescaling magic here!
+    def update(scalings, **kwargs):
+        rs = np.linspace(np.finfo(np.float32).eps,rmax, Nplt)
+        Ls = np.zeros_like(rs)
+
+        scargs = {}
+        for k, v in kwargs.items():
+            scargs[k] = v*10**scalings[k]
+
+        for i, r in enumerate(rs):
+            try:
+                d = get_dev(r=r, **scargs)
+            except:
+                Ls[i] = np.nan
+            else:
+                Ls[i] = d
+        line.set_xdata(rs)
+        line.set_ydata(Ls)
+        ax.set_xlim(rs[0], rs[-1])
+        ax.set_ylim(1.1*np.nanmin(Ls), 1.1*np.nanmax(Ls))
+        fig.canvas.draw_idle()
+
+    lo = Layout(width='80%', height='30px')
+    sliders = {}
+    scalings = {}
+    for k, v in coefpars.items():
+        vs = v*10**(-magnitude(v))
+        scalings[k] = magnitude(v)
+        sliders[k] = FloatSlider(value=vs, min=-1.2*vs*negative, max=1.2*vs, step=1e-3, readout_format='.3e', layout=lo)
+
+    print(scalings)
+    return interactive(update, scalings=fixed(scalings), **sliders)
+
+def get_deviation(r, degmodenum=1, **kwargs):
+    elements = cavfct(**kwargs)
+    sys = RaySystem(elements)
+    system = sys.abcd
+    mu1, mu2 = system.q
+    waist = system.waist_at(0)[0]
+    mu = mu1 if degmodenum==1 else mu2
+    rmu = np.linalg.norm(np.real(mu[:2]))
+    mu = np.real(r*waist/rmu*mu)
+    ray0 = sys.screen.eigenvectors_to_rays(mu)
+    traj_hit = sys.propagate(ray0, Nrt=Nrt, at_screen=True)
+    hit_scr = sys.screen.r_to_screen_coords(traj_hit[:,0,0,:])
+    hit_1 = hit_scr[::3,:]
+    hit_2 = hit_scr[1::3,:]
+    hit_3 = hit_scr[2::3,:]
+    #approximate path length described by dots through piecwise linear distance
+    dev = np.linalg.norm(hit_1[1:,:]-hit_1[:-1,:], axis=1).sum() +\
+            np.linalg.norm(hit_2[1:,:]-hit_2[:-1,:], axis=1).sum() +\
+            np.linalg.norm(hit_3[1:,:]-hit_3[:-1,:], axis=1).sum()
+    return dev

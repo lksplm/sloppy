@@ -125,7 +125,9 @@ class Screen(Optic):
         s0 = self.s_to_screen_coords(ray[1,:,:])
         mu = np.concatenate([r0, s0], axis=1)
         return mu
-        
+    
+    def aberrations(self, chi):
+        raise NotImplementedError("aberrations not defined for this element")
         
 class CurvedMirror(Optic):
     """Curved reflecting mirror, can be conccave ('CC') or convex ('CX').
@@ -205,7 +207,7 @@ class CurvedGlass(Optic):
         self.n1 = n1
         self.n2 = n2
         self.nratio = n1/n2
-        self.R = abs(R)
+        self.R = R
         self.curv = curv
         if curv == 'CC':
             self.jopt = JitOptic(p=self.p, n=self.n, ax=self.ax, ay=self.ay, Rot=self.Rot, rapt=self.rapt, R=abs(self.R), nratio=self.nratio, otype=5)
@@ -222,14 +224,36 @@ class CurvedGlass(Optic):
         
     def plot(self, n_radii = 10, n_angles = 10, **kwargs):
         x, y = disc_coords(n_radii = n_radii, n_angles = n_angles, R=self.rapt)
-        z = self.R-np.sqrt(self.R**2-x**2-y**2)
-        if self.curv=='CX':
-            z = -z
+        #z = self.R-np.sqrt(self.R**2-x**2-y**2)
+        #if self.curv=='CX':
+        #    z = -z
+        if self.curv=='CC':
+            z = self.R-np.sqrt(self.R**2-x**2-y**2)
+        else:
+            z = -self.R+np.sqrt(self.R**2-x**2-y**2)
         indices = Triangulation(x,y).triangles.astype(np.uint32)
         mesh = k3d.mesh(np.vstack([x,y,z]).T, indices, **kwargs)
         mesh.transform.translation = self.p
         mesh.transform.custom_matrix = pad3to4(self.Rot).astype(np.float32)
         return mesh
+    
+    def aberrations(self, chi):
+        #shape of chi is (4, N, N)
+        x, y, sx, sy = chi
+        c2 = 1./(2*self.R)
+        c4 = 1./(8*self.R**3)
+        n, m = self.n1, self.n2
+        px, py = self.n1*sx, self.n1*sy
+        x2, y2 = x@x, y@y
+        x2py2 = x2+y2
+        pxx, pyy = px@x, py@y
+        
+        sph4 = (n-m)*( 2*c2**2/m*(pxx+pyy)@x2py2\
+                    + c2/3.*(1./(2*m*n)-1)*(px@px+py@py)@x2py2\
+                    + c2/3.*(1+1./(m*n))*(pxx+pyy)@(pxx+pyy)\
+                    + (2*(n/m-1)*c2**3+c4)*x2py2@x2py2)
+        
+        return sph4
     
 class FreeFormMirror(Optic):
     """Free form radially symmetric optic of the form z = \sum_i=0^deg coef[i] r**i
@@ -266,6 +290,7 @@ class FreeFormInterface(FreeFormMirror):
         self.n1 = n1
         self.n2 = n2
         self.nratio = n1/n2
+        self.coef = coef
         self.jopt = JitOptic(p=self.p, n=self.n, ax=self.ax, ay=self.ay, Rot=self.Rot, rapt=self.rapt, coef=self.coef, nratio=self.nratio, otype=8)
         
         m = np.identity(4)
@@ -277,3 +302,21 @@ class FreeFormInterface(FreeFormMirror):
             m[2,0] = (n1-n2)/n2*Req_inv
             m[3,1] = (n1-n2)/n2*Req_inv
         self.m = m
+        
+    def aberrations(self, chi):
+        #shape of chi is (4, N, N)
+        x, y, sx, sy = chi
+        c2 = -self.coef[2]
+        c4 = -self.coef[4]
+        n, m = self.n1, self.n2
+        px, py = self.n1*sx, self.n1*sy
+        x2, y2 = x@x, y@y
+        x2py2 = x2+y2
+        pxx, pyy = px@x, py@y
+        
+        sph4 = (n-m)*( 2*c2**2/m*(pxx+pyy)@x2py2\
+                    + c2/3.*(1./(2*m*n)-1)*(px@px+py@py)@x2py2\
+                    + c2/3.*(1+1./(m*n))*(pxx+pyy)@(pxx+pyy)\
+                    + (2*(n/m-1)*c2**3+c4)*x2py2@x2py2)
+        
+        return sph4
