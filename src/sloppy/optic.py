@@ -224,13 +224,14 @@ class CurvedGlass(Optic):
         
     def plot(self, n_radii = 10, n_angles = 10, **kwargs):
         x, y = disc_coords(n_radii = n_radii, n_angles = n_angles, R=self.rapt)
-        #z = self.R-np.sqrt(self.R**2-x**2-y**2)
-        #if self.curv=='CX':
-        #    z = -z
-        if self.curv=='CC':
-            z = self.R-np.sqrt(self.R**2-x**2-y**2)
-        else:
-            z = -self.R+np.sqrt(self.R**2-x**2-y**2)
+        R = abs(self.R)
+        z = R-np.sqrt(R**2-x**2-y**2)
+        if self.curv=='CX':
+            z = -z
+        #if self.curv=='CC':
+        #    z = self.R-np.sqrt(self.R**2-x**2-y**2)
+        #else:
+        #    z = -self.R+np.sqrt(self.R**2-x**2-y**2)
         indices = Triangulation(x,y).triangles.astype(np.uint32)
         mesh = k3d.mesh(np.vstack([x,y,z]).T, indices, **kwargs)
         mesh.transform.translation = self.p

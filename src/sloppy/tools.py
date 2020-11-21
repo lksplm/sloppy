@@ -13,7 +13,7 @@ def waist_vs_l(cavfct, cavpars, Npts=500):
     sys = RaySystem(elements)
 
     system = sys.abcd
-    x = np.linspace(0, system.Ltot, 500)
+    x = np.linspace(0, system.Ltot, Npts)
     ws = system.compute_waists(x)
 
     plt.figure()
@@ -94,7 +94,7 @@ def cavity_parameter_interaction_factory(cavfct, parname, scanrange, N = 300):
     return interactive(update_waists_vs_params, cavfct=fixed(cavfct), parname = fixed('lens_dist'), N=fixed(N), **sliders)
 
 
-def waists_vs_param(cavfct, parname, scanrange, N=300, degmodenum=1):
+def waists_vs_param(cavfct, parname, scanrange, N=300, degmodenum=1, s=3):
     stab = lambda m: abs(0.5*np.trace(m))<1
     La = inspect.signature(cavfct).parameters[parname].default
     Las = La + np.linspace(-scanrange*La, scanrange*La, N)
@@ -115,7 +115,7 @@ def waists_vs_param(cavfct, parname, scanrange, N=300, degmodenum=1):
         else:
             ms[i] = stab(system.abcd_rt)
             ws[i,:] = np.sort(w)
-            freqs[i,...] = np.concatenate(system.get_freqs())
+            freqs[i,...] = np.concatenate(system.get_freqs(s=s))
 
     # find the degeneracy condition: smallest s-fold transverse mode splitting with a stable mode
     degIdx=1+degmodenum
