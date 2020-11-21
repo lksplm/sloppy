@@ -77,7 +77,7 @@ def geometry(mir):
     
     #Reflect vector
     def RefV(j, vec):
-        return vec - (vec@refl[j])*refl[j]
+        return vec - 2*(vec@refl[j])*refl[j]
     
     changeBasisAcross = np.stack([np.array([[RefV(i,xin[i])@xout[i], RefV(i,yin[i])@xout[i]],\
                                             [RefV(i,xin[i])@yout[i], RefV(i,yin[i])@yout[i]]]) for i in range(Nm)], axis=0)

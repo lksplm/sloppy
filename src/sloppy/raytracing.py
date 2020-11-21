@@ -241,13 +241,66 @@ class RaySystem:
             rconv, rseq, tols = self._find_eigenray_formpe(rnew, lr=lr, maxiter=Niter, tol=tol*1e-1, **kwargs)
             if get_tols:
                 alltols.append(tols)
+            #if inner loop terminates early, break and don't do MPE step
             if rseq.shape[0]<4:
                 rnew = rconv
                 break
+                
+            #if inner loop reaches desired tolerance, break and don't do MPE step
+            if tols[-1]<tol:
+                rnew = rconv
+                break
+                
             rseq_rs = np.squeeze(rseq).reshape(-1,6).T #reshape sequence into format for MPE
             rnew = RaySystem.MPE(rseq_rs) #find new starting vector
             rnew = rnew.reshape(2,-1,3)
         if get_tols:
-            return rnew, np.concatenate(alltraj, axis=0), np.concatenate(alltols)
+            return rnew, np.concatenate(alltols)
+        else:
+            return rnew
+        
+    def find_eigenray_mpe_dev(self, ray0, lr=0.03, Niter=50, Nmpe=5, tol=1e-9, get_tols=False, lr_decay=0.9, **kwargs):
+        """Version of :function:`find_eigenray` that uses MPE to accelerate convergence.
+
+        Args:
+            Nrt (int): Number of roundtrips to propagate between iteration steps.
+            Niter (int): Number of iterations of the inner (iterative) fixpoint algorithm.
+            Nmpe (int): Number of iterations of the outer (MPE) fixpoint algorithm.
+            tol (float): Tolerance (relative change) down to which to iterate.
+
+        Returns:
+            rnew (ndarray): Eigenray of the system (2, Nrays, 3).
+        """
+        rnew = ray0.copy()
+        alltols = []
+        lr_i = lr
+        tolmin = np.inf
+        raymin = ray0.copy()
+        for i in range(Nmpe):
+            rconv, rseq, tols = self._find_eigenray_formpe(rnew, lr=lr_i, maxiter=Niter, tol=tol*1e-1, **kwargs)
+            if get_tols:
+                alltols.append(tols)
+                
+            #find "best" eigenray (lowest tolerance)
+            
+            
+            #if inner loop terminates early, break and don't do MPE step
+            if rseq.shape[0]<10:
+                rnew = rconv
+                break
+                
+            #if inner loop reaches desired tolerance, break and don't do MPE step
+            if tols[-1]<tol:
+                rnew = rconv
+                break
+                
+            rseq_rs = np.squeeze(rseq).reshape(-1,6).T #reshape sequence into format for MPE
+            rnew = RaySystem.MPE(rseq_rs) #find new starting vector
+            rnew = rnew.reshape(2,-1,3)
+            #decay learning rate/relaxation constant with each iteration
+            lr_i = lr_i*lr_decay
+            
+        if get_tols:
+            return rnew, np.concatenate(alltols)
         else:
             return rnew
