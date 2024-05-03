@@ -233,8 +233,8 @@ class ABCDSystem:
     
     def solve_mode(self, BiK, n=1.):
         """Get waists (diagonal) from eigenvectors."""
-        if not self.is_stable:
-            return [0, 0]
+        #if not self.is_stable:
+        #    return [0, 0]
         B = BiK[:,:2]
         K = -1j*BiK[:,2:]
         lam = self.wl
@@ -274,7 +274,7 @@ class ABCDSystem:
         return ws
     
     def q_at(self, x):
-        self.propBiK(self.q, self.abcd_at(x))
+        return self.propBiK(self.q, self.abcd_at(x))
         
     def get_freqs(self, s=3):
         return self.M2freq(self.abcd_rt, s=s)
