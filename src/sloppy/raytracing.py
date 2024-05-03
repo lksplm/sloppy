@@ -1,5 +1,7 @@
 import numpy as np
-from numba import jit, jitclass, njit, prange
+from numba import jit, njit, prange
+from numba import jit, njit
+from numba.experimental import jitclass
 from numba import boolean, int32, float32, float64    # import the types
 import numba as nb
 import math
