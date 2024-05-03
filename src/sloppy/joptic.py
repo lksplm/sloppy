@@ -1,6 +1,5 @@
 import numpy as np
-#from numba import jit, jitclass, njit
-from numba import jit, njit
+from numba import jit, njit #jitclass, 
 from numba.experimental import jitclass
 from numba import boolean, int32, float32, float64    # import the types
 import numba as nb
@@ -158,6 +157,29 @@ class JitOptic(object):
         qp = rp+t*sp
         q = self.Rot@qp + self.p
         return q
+    
+    def _intersect_tfree(self, ray, clip=True):
+        # special case for thorlabs optics with conical constant
+        r = ray[0,:]
+        s = ray[1,:]
+        #flat intersection first for speed
+        sn = dot(s, self.n)
+        #prevent ray perpendicular to surface
+        if np.abs(sn)<=np.finfo(np.float32).eps:
+            return r*np.inf
+        t0 = dot((self.poffs - r), self.n)/sn
+        x = r + t0*s
+        if clip:
+            dist = fnorm(x - self.poffs)
+            if dist>self.rapt:
+                return r*np.inf
+        #from here free form
+        rp, sp = self.RotT@(r-self.p), self.RotT@s
+        #t = brentq(lambda t: self._free_F(rp+t*sp), 0.5*t0, 2*t0)
+        t = self.find_root(self._free_T, rp, sp, 0.5*t0, 2*t0)
+        qp = rp+t*sp
+        q = self.Rot@qp + self.p
+        return q
         
     def _propagate_flat(self, ray, clip=True):
         q = self._intersect_flat(ray, clip=clip)
@@ -307,12 +329,55 @@ class JitOptic(object):
         sp = sp/fnorm(sp)
         rout = np.vstack((q, sp))
         return rout
+    
+    def _propagate_tfree_interface(self, ray, clip=True):
+        r = ray[0,:]
+        s = ray[1,:]
+        #flat intersection first for speed
+        sn = dot(s, self.n)
+        #prevent ray perpendicular to surface
+        if np.abs(sn)<=np.finfo(np.float32).eps:
+            return ray*np.inf
+        t0 = dot((self.poffs - r), self.n)/sn
+        x = r + t0*s
+        if clip:
+            dist = fnorm(x - self.poffs)
+            if dist>self.rapt:
+                return ray*np.inf
+        #from here free form
+        rp, sp = self.RotT@(r-self.p), self.RotT@s #go into local coordinates
+        #t = minimize_scalar(lambda t: abs(self._free_F(rp+t*sp)), bounds=(0.5*t0, 2*t0), tol=1e-9).x #find intersection
+        #t = brentq(lambda t: self._free_F(rp+t*sp), 0.5*t0, 2*t0)
+        t = self.find_root(self._free_T, rp, sp, 0.5*t0, 2*t0)
+        qp = rp+t*sp
+        mp = self._free_dT(qp)
+        mp = mp/fnorm(mp)
+        q = self.Rot@qp + self.p #go back into global coordinates
+        n = self.Rot@mp #normal vector in global coords, proceed as normal
+        
+        #make sure there is always transmission and no reflection!
+        c = -dot(s, n)
+        if c>0.0: #normal case, ray is coming from medium 1 and refracted into medium 2
+            nr = self.nratio
+            dis = 1 - nr**2*(1 - c**2)#prevent total internal reflection?
+            sp = nr*s + (nr*c - math.sqrt(dis))*n
+        else: #reversed case, ray is comming from the other direction! reverse normal vec and ior ratio!
+            nr = 1.0/self.nratio
+            c = -c
+            dis = 1 - nr**2*(1 - c**2)#prevent total internal reflection?
+            sp = nr*s + (math.sqrt(dis) - nr*c)*n
+
+        sp = sp/fnorm(sp)
+        rout = np.vstack((q, sp))
+        return rout
         
     def intersect(self, ray, clip=True):
         if self.otype == 2 or self.otype == 3 or self.otype == 5 or self.otype == 6: #Curved mirror
             return self._intersect_curv(ray, clip)
-        elif self.otype == 7 or self.otype == 8:
+        elif self.otype == 7 or self.otype == 8: # asphere polynomial
             return self._intersect_free(ray, clip)
+        elif self.otype == 9: # asphere thorlabs
+            return self._intersect_tfree(ray, clip)
         else:
             return self._intersect_flat(ray, clip)
         
@@ -329,6 +394,8 @@ class JitOptic(object):
             return self._propagate_free(ray, clip)
         elif self.otype == 8:
             return self._propagate_free_interface(ray, clip)
+        elif self.otype == 9:
+            return self._propagate_tfree_interface(ray, clip)
         else:
             return self._propagate_flat(ray, clip)
         
@@ -374,6 +441,41 @@ class JitOptic(object):
             dy += i*y*self.coef[i]*r**(i-2)
         return np.array([-dx, -dy, 1.])
     
+    def _free_T(self, v):
+        x, y, z = v
+        r = np.sqrt(x**2 + y**2)
+        # Thorlabs asphere form including ROC R (coeffs[0]) and conic constanc c (coeffs [1])
+        deg = len(self.coef)-2
+        _R = self.coef[0]
+        _k = self.coef[1]
+        
+        val = r**2/(_R*(1+np.sqrt(1-(1+k)*r**2/_R**2)))
+        # the coeff array starts at 2 now, so the total array is
+        #[R, k, A2, A4, A6, A6]
+        
+        #deg = 3 # should give 2, 4, 6
+        # [(i, 2*i) for i in range(2,deg+2)]
+        # yields [(2, 4), (3, 6), (4, 8)]
+        
+        for i in range(2,deg+2):
+            n = 2*i
+            val += self.coef[i]*r**n
+        return z - val
+    
+    def _free_dT(self, v):
+        x, y, z = v
+        r = np.sqrt(x**2 + y**2)
+        deg = len(self.coef)-2
+        _R = self.coef[0]
+        _k = self.coef[1]
+        
+        dx = x/(_R*np.sqrt(1-(r**2*(1+k))/_R**2))
+        dy = y/(_R*np.sqrt(1-(r**2*(1+k))/_R**2))
+        for i in range(2,deg+2):
+            n = 2*i
+            dx += n*x*self.coef[i]*r**(n-2)
+            dy += n*y*self.coef[i]*r**(n-2)
+        return np.array([-dx, -dy, 1.])
     
     def find_root(self, F, rvec, svec, a, b, t=1e-9, machep=np.finfo(np.float64).resolution, maxiter=500):
         sa = a
