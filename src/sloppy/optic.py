@@ -321,3 +321,44 @@ class FreeFormInterface(FreeFormMirror):
                     + (2*(n/m-1)*c2**3+c4)*x2py2@x2py2)
         
         return sph4
+    
+class ThorlabsAsphere(FreeFormMirror):
+    """Free form radially symmetric optic of the form z = \sum_i=0^deg coef[i] r**i
+    Args:
+        coef (ndarray): coefficients [R, k, A2, A4, ...]
+    """
+    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, Rbasis=np.eye(4), coef=np.zeros(3), n1=1., n2=1.):
+        super().__init__(p, n, ax, ay, diameter, Rbasis, coef)
+        self.n1 = n1
+        self.n2 = n2
+        self.nratio = n1/n2
+        self.coef = coef
+        self.jopt = JitOptic(p=self.p, n=self.n, ax=self.ax, ay=self.ay, Rot=self.Rot, rapt=self.rapt, coef=self.coef, nratio=self.nratio, otype=9)
+        
+        m = np.identity(4)
+        m[2,2] = self.nratio
+        m[3,3] = self.nratio
+
+        if abs(coef[2])>0.: #quadratic curvature non-zero
+            Req_inv = -2*coef[2] #WHY minus -> actually the right sign due to different deffinitions of CX/CC vs coeff
+            m[2,0] = (n1-n2)/n2*Req_inv
+            m[3,1] = (n1-n2)/n2*Req_inv
+        self.m = m
+        
+    def aberrations(self, chi):
+        #shape of chi is (4, N, N)
+        x, y, sx, sy = chi
+        c2 = -self.coef[2]
+        c4 = -self.coef[4]
+        n, m = self.n1, self.n2
+        px, py = self.n1*sx, self.n1*sy
+        x2, y2 = x@x, y@y
+        x2py2 = x2+y2
+        pxx, pyy = px@x, py@y
+        
+        sph4 = (n-m)*( 2*c2**2/m*(pxx+pyy)@x2py2\
+                    + c2/3.*(1./(2*m*n)-1)*(px@px+py@py)@x2py2\
+                    + c2/3.*(1+1./(m*n))*(pxx+pyy)@(pxx+pyy)\
+                    + (2*(n/m-1)*c2**3+c4)*x2py2@x2py2)
+        
+        return sph4
