@@ -21,7 +21,7 @@ def fnorm(v):
 
 
 @njit
-def locate_point_in_lattice(point, a1, a2, origin_centered):
+def __locate_point_in_lattice(point, a1, a2, origin_centered):
     """
     Locate where a point falls in the lattice.
     
@@ -273,8 +273,8 @@ class JitOptic(object):
         qp = self.RotT @ (q_flat - self.p)
         
         # Use only x,y coordinates for lattice
-        center_coords, cell_center = self.locate_point_in_lattice(qp[:2])
-        
+        _idx, center_coords, cell_center = self.locate_point_in_lattice(qp[:2])
+        # print("intersect idx ", _idx)
         # Calculate distance from the hit point to the center of the lenslet
         r_from_center = fnorm(center_coords)
         
@@ -515,8 +515,8 @@ class JitOptic(object):
         qp_local = self.RotT @ (q - self.p)
         
         # Determine which lenslet was hit
-        center_coords, cell_center = self.locate_point_in_lattice(qp_local[:2])
-        
+        _idx, center_coords, cell_center = self.locate_point_in_lattice(qp_local[:2])
+        # print("index ", _idx)
         # Calculate distance from the hit point to the lenslet center
         r_from_center = fnorm(center_coords)
         
@@ -757,3 +757,48 @@ class JitOptic(object):
         value = sb
         return value
     
+    def locate_point_in_lattice(self, point):
+        """
+        Locate where a point falls in the lattice.
+        
+        Parameters:
+        -----------
+        point : numpy.ndarray
+            The (x, y) coordinates of the point
+            
+        Returns:
+        --------
+        center_coords : numpy.ndarray
+            The coordinates relative to the cell center
+        cell_center : numpy.ndarray
+            The (x, y) coordinates of the center of the identified unit cell
+        """
+        # Calculate reciprocal vectors
+        det = self.a1[0] * self.a2[1] - self.a1[1] * self.a2[0]
+        b1 = np.array([self.a2[1], -self.a2[0]]) / det
+        b2 = np.array([-self.a1[1], self.a1[0]]) / det
+        
+        # Calculate offset
+        if self.origin_centered:
+            offset = -0.5 * (self.a1 + self.a2)
+        else:
+            offset = np.zeros(2)
+        
+        # Adjust point if lattice is centered
+        adjusted_point = point - offset
+        
+        # Calculate fractional coordinates
+        frac_1 = adjusted_point[0] * b1[0] + adjusted_point[1] * b1[1]
+        frac_2 = adjusted_point[0] * b2[0] + adjusted_point[1] * b2[1]
+        
+        # Get the cell indices
+        i = int(np.floor(frac_1))
+        j = int(np.floor(frac_2))
+        
+        # Calculate the center of the identified unit cell
+        cell_center = i * self.a1 + j * self.a2 + offset + 0.5 * (self.a1 + self.a2)
+        
+        # Calculate coordinates relative to the cell center
+        center_coords = point - cell_center
+        
+        return (i, j), center_coords, cell_center
