@@ -362,3 +362,112 @@ class ThorlabsAsphere(FreeFormMirror):
                     + (2*(n/m-1)*c2**3+c4)*x2py2@x2py2)
         
         return sph4
+    
+class MicroLensArray(Optic):
+    """A microlens array with spherical lenslets arranged in a grid pattern."""
+    
+    def __init__(self, p=(0., 0., 0.), n=(0., 0., 1.), ax=(1., 0., 0.), ay=(0., 1., 0.), 
+                 diameter=1.0, R=1., curv='CC', n1=1., n2=1., 
+                 a1=(0.1, 0), a2=(0, 0.1), origin_centered=True, Rbasis=np.eye(4)):
+        """
+        Args:
+            p: Position of the MLA
+            n: Normal vector 
+            ax, ay: Local coordinate system vectors
+            diameter: Overall diameter of the MLA
+            R: Radius of curvature of individual lenslets
+            curv: 'CC' or 'CX' - curvature type for lenslets
+            n1: Refractive index on incident side
+            n2: Refractive index on exit side
+            a1, a2: Lattice vectors defining the grid of lenslets
+            origin_centered: If True, the first lenslet is centered at the origin
+        """
+        super().__init__(p, n, ax, ay, diameter, Rbasis)
+        
+        self.R = abs(R)
+        self.n1 = n1
+        self.n2 = n2
+        self.nratio = n1/n2
+        self.a1 = np.array(a1, dtype=np.float64)
+        self.a2 = np.array(a2, dtype=np.float64)
+        self.origin_centered = origin_centered
+        self.curv = curv
+        
+        # Create JitOptic with MLA type
+        if curv == 'CC':
+            self.jopt = JitOptic(p=self.p, n=self.n, ax=self.ax, ay=self.ay, Rot=self.Rot, 
+                               rapt=self.rapt, R=self.R, nratio=self.nratio, otype=11,
+                               a1=self.a1, a2=self.a2, origin_centered=self.origin_centered)
+        elif curv == 'CX':
+            self.jopt = JitOptic(p=self.p, n=self.n, ax=self.ax, ay=self.ay, Rot=self.Rot, 
+                               rapt=self.rapt, R=self.R, nratio=self.nratio, otype=12,
+                               a1=self.a1, a2=self.a2, origin_centered=self.origin_centered)
+        else:
+            raise ValueError(f"Curvature type {curv} unknown! Must be CC or CX")
+            
+        # ABCD matrix calculation (approximation based on lens power)
+        m = np.identity(4)
+        m[2,2] = n1/n2
+        m[3,3] = n1/n2
+        m[2,0] = (n1-n2)/(R*n2) 
+        m[3,1] = (n1-n2)/(R*n2)
+        self.m = m
+        
+    def plot(self, n_radii=10, n_angles=10, lattice_size=5, **kwargs):
+        """Plot the microlens array with multiple lenslets."""
+        import k3d
+        from matplotlib.tri import Triangulation
+        
+        # Calculate lattice extent
+        half_size = lattice_size // 2
+        points = []
+        faces = []
+        vertex_count = 0
+        
+        # Generate a mesh for each lenslet
+        for i in range(-half_size, half_size + 1):
+            for j in range(-half_size, half_size + 1):
+                # Calculate lenslet center
+                lenslet_center = i * self.a1 + j * self.a2
+                if self.origin_centered:
+                    lenslet_center += 0.5 * (self.a1 + self.a2)
+                
+                # Create lenslet surface
+                x, y = disc_coords(n_radii=n_radii, n_angles=n_angles, 
+                                   R=min(np.linalg.norm(self.a1), np.linalg.norm(self.a2)) / 2)
+                
+                # Shift to lenslet center
+                x = x + lenslet_center[0]
+                y = y + lenslet_center[1]
+                
+                # Calculate z based on spherical surface
+                r_sqr = (x - lenslet_center[0])**2 + (y - lenslet_center[1])**2
+                mask = r_sqr < self.R**2  # Only valid points
+                
+                if not np.any(mask):
+                    continue  # Skip this lenslet if no valid points
+                
+                # Calculate z values based on curvature
+                z = np.zeros_like(x)
+                if self.curv == 'CC':
+                    z[mask] = self.R - np.sqrt(self.R**2 - r_sqr[mask])
+                else:  # 'CX'
+                    z[mask] = -self.R + np.sqrt(self.R**2 - r_sqr[mask])
+                
+                # Create triangulation for this lenslet
+                tri = Triangulation(x, y).triangles
+                
+                # Add vertices and faces to the global lists
+                points.append(np.vstack([x, y, z]).T)
+                faces.append(tri + vertex_count)
+                vertex_count += len(x)
+        
+        # Combine all vertices and faces
+        points = np.vstack(points)
+        faces = np.vstack(faces).astype(np.uint32)
+        
+        # Create the mesh
+        mesh = k3d.mesh(points, faces, **kwargs)
+        mesh.transform.translation = self.p
+        mesh.transform.custom_matrix = pad3to4(self.Rot).astype(np.float32)
+        return mesh

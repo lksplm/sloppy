@@ -18,6 +18,64 @@ def dot(a, b):
 @njit('float64(float64[:])')
 def fnorm(v):
     return math.sqrt(dot(v,v))
+
+
+@njit
+def locate_point_in_lattice(point, a1, a2, origin_centered):
+    """
+    Locate where a point falls in the lattice.
+    
+    Parameters:
+    -----------
+    point : numpy.ndarray
+        The (x, y) coordinates of the point
+    a1, a2 : numpy.ndarray
+        The two basis vectors defining the lattice
+    origin_centered : bool
+        If True, the first unit cell is centered at the origin
+        
+    Returns:
+    --------
+    cell_indices : tuple
+        The indices (i, j) of the unit cell containing the point
+    fractional_coords : numpy.ndarray
+        The fractional coordinates within the unit cell (values between 0 and 1)
+    cell_center : numpy.ndarray
+        The (x, y) coordinates of the center of the identified unit cell
+    """
+    # Calculate reciprocal vectors (inlined)
+    det = a1[0] * a2[1] - a1[1] * a2[0]
+    b1 = np.array([a2[1], -a2[0]]) / det
+    b2 = np.array([-a1[1], a1[0]]) / det
+    
+    # Calculate offset (inlined)
+    offset = -0.5 * (a1 + a2) if origin_centered else np.zeros(2)
+    
+    # Adjust point if lattice is centered
+    adjusted_point = point - offset
+    
+    # Calculate fractional coordinates using dot products with reciprocal lattice vectors
+    frac_1 = adjusted_point[0] * b1[0] + adjusted_point[1] * b1[1]
+    frac_2 = adjusted_point[0] * b2[0] + adjusted_point[1] * b2[1]
+    
+    # Get the cell indices by flooring the fractional coordinates
+    i = int(np.floor(frac_1))
+    j = int(np.floor(frac_2))
+
+    # Calculate the position within the unit cell relative to bottom-left corner
+    corner_frac_coords = np.array([frac_1 - i, frac_2 - j])
+    
+    # Convert to coordinates relative to cell center (-0.5 to 0.5 in each dimension)
+    # This makes the center of the cell (0,0)
+    center_frac_coords = corner_frac_coords - 0.5
+    
+    # Calculate the center of the identified unit cell
+    cell_center = i * a1 + j * a2 + offset + 0.5 * (a1 + a2)
+
+    center_coords = center_frac_coords*a1 + center_frac_coords*a2
+    
+    return (i, j), center_coords, cell_center
+
 """
 Monolithic optic class accelerated with numba
 """
@@ -41,7 +99,10 @@ spec = [
     ('mu', float64[:]),
     ('mus', float64[:,:]),
     ('v', float64[:]),
-    ('coef', float64[:])
+    ('coef', float64[:]),
+    ('a1', float64[:]),
+    ('a2', float64[:]),
+    ('origin_centered', boolean),
 ]
 """
 otype: Main switch to set the type of optic considered>
@@ -59,7 +120,7 @@ otype: Main switch to set the type of optic considered>
 """
 @jitclass(spec)
 class JitOptic(object):
-    def __init__(self, p, n, ax, ay, Rot, rapt, R=0., nratio=1.0, otype=0, coef=np.zeros(3)):
+    def __init__(self, p, n, ax, ay, Rot, rapt, R=0., nratio=1.0, otype=0, coef=np.zeros(3), a1=np.zeros(2), a2=np.zeros(2), origin_centered=False):
         self.rapt = rapt
         self.p = p
         self.n = n
@@ -70,6 +131,11 @@ class JitOptic(object):
         self.Rot = Rot
         self.RotT = Rot.T
         self.coef = coef
+
+        # Add MLA attributes
+        self.a1 = a1
+        self.a2 = a2
+        self.origin_centered = origin_centered
         
         self.otype = otype
         if self.otype == 2 or self.otype == 5: #CC
@@ -164,9 +230,11 @@ class JitOptic(object):
         s = ray[1,:]
         #flat intersection first for speed
         sn = dot(s, self.n)
+
         #prevent ray perpendicular to surface
         if np.abs(sn)<=np.finfo(np.float32).eps:
             return r*np.inf
+        
         t0 = dot((self.poffs - r), self.n)/sn
         x = r + t0*s
         if clip:
@@ -180,6 +248,67 @@ class JitOptic(object):
         qp = rp+t*sp
         q = self.Rot@qp + self.p
         return q
+    
+    def _intersect_mla(self, ray, clip=True):
+        """Intersect with a microlens array."""
+        # First intersect with flat surface
+        r = ray[0,:]
+        s = ray[1,:]
+        sn = dot(s, self.n)
+
+        #prevent ray perpendicular to surface
+        if np.abs(sn) <= np.finfo(np.float32).eps:
+            return r * np.inf 
+        
+        t = dot((self.p - r), self.n) / sn
+        q_flat = r + t * s
+        
+        # Check if within the overall aperture
+        if clip:
+            dist = fnorm(q_flat - self.p)
+            if dist > self.rapt:
+                return r * np.inf
+        
+        # Transform intersection point to local coordinates
+        qp = self.RotT @ (q_flat - self.p)
+        
+        # Use only x,y coordinates for lattice
+        center_coords, cell_center = self.locate_point_in_lattice(qp[:2])
+        
+        # Calculate distance from the hit point to the center of the lenslet
+        r_from_center = fnorm(center_coords)
+        
+        # Calculate radius of the lenslet (half the minimum lattice vector length)
+        lenslet_radius = min(fnorm(self.a1), fnorm(self.a2)) / 2.0
+        
+        # Check if intersection is within the circular lenslet
+        if r_from_center > lenslet_radius:
+            # Outside the lenslet, treat as flat surface
+            return q_flat
+        
+        # Prevent sqrt of negative
+        if r_from_center >= self.R:
+            # The point is beyond the valid radius of the spherical cap
+            return q_flat
+        
+        # Calculate the height offset
+        height = np.sqrt(self.R**2 - r_from_center**2)
+        
+        # Adjust based on curvature type
+        if self.otype == 11:  # CC MLA
+            # Concave: the surface curves away from the ray
+            z_offset = self.R - height
+        else:  # CX MLA
+            # Convex: the surface curves toward the ray
+            z_offset = height - self.R
+        
+        # Create the final intersection point in local coordinates
+        qp_curved = np.array([qp[0], qp[1], z_offset])
+        
+        # Transform back to global coordinates
+        q_curved = self.Rot @ qp_curved + self.p
+        
+        return q_curved
         
     def _propagate_flat(self, ray, clip=True):
         q = self._intersect_flat(ray, clip=clip)
@@ -274,10 +403,10 @@ class JitOptic(object):
         n = n/fnorm(n)
         
         #make sure there is always transmission and no reflection!
-        c = -dot(s, n)
+        c = -dot(s, self.n)
         if c>0.0: #normal case, ray is coming from medium 1 and refracted into medium 2
             r = self.nratio
-            dis = 1 - r**2*(1 - c**2)#prevent total internal reflection?
+            dis = 1 - r**2*(1 - c**2) #prevent total internal reflection?
             sp = r*s + (r*c - math.sqrt(dis))*n
         else: #reversed case, ray is comming from the other direction! reverse normal vec and ior ratio!
             r = 1.0/self.nratio
@@ -297,12 +426,14 @@ class JitOptic(object):
         #prevent ray perpendicular to surface
         if np.abs(sn)<=np.finfo(np.float32).eps:
             return ray*np.inf
+        
         t0 = dot((self.poffs - r), self.n)/sn
         x = r + t0*s
         if clip:
             dist = fnorm(x - self.poffs)
             if dist>self.rapt:
                 return ray*np.inf
+            
         #from here free form
         rp, sp = self.RotT@(r-self.p), self.RotT@s #go into local coordinates
         #t = minimize_scalar(lambda t: abs(self._free_F(rp+t*sp)), bounds=(0.5*t0, 2*t0), tol=1e-9).x #find intersection
@@ -315,7 +446,7 @@ class JitOptic(object):
         n = self.Rot@mp #normal vector in global coords, proceed as normal
         
         #make sure there is always transmission and no reflection!
-        c = -dot(s, n)
+        c = -dot(s, self.n)
         if c>0.0: #normal case, ray is coming from medium 1 and refracted into medium 2
             nr = self.nratio
             dis = 1 - nr**2*(1 - c**2)#prevent total internal reflection?
@@ -356,7 +487,7 @@ class JitOptic(object):
         n = self.Rot@mp #normal vector in global coords, proceed as normal
         
         #make sure there is always transmission and no reflection!
-        c = -dot(s, n)
+        c = -dot(s, self.n)
         if c>0.0: #normal case, ray is coming from medium 1 and refracted into medium 2
             nr = self.nratio
             dis = 1 - nr**2*(1 - c**2)#prevent total internal reflection?
@@ -370,6 +501,81 @@ class JitOptic(object):
         sp = sp/fnorm(sp)
         rout = np.vstack((q, sp))
         return rout
+    
+    def _propagate_mla(self, ray, clip=True):
+        """Propagate through a microlens array."""
+        # Get intersection point
+        q = self._intersect_mla(ray, clip=clip)
+        if np.isinf(q[0]):
+            return ray * np.inf  # Ray missed the surface
+            
+        s = ray[1,:]
+        
+        # Transform intersection point to local coordinates
+        qp_local = self.RotT @ (q - self.p)
+        
+        # Determine which lenslet was hit
+        center_coords, cell_center = self.locate_point_in_lattice(qp_local[:2])
+        
+        # Calculate distance from the hit point to the lenslet center
+        r_from_center = fnorm(center_coords)
+        
+        # Calculate radius of the lenslet
+        lenslet_radius = min(fnorm(self.a1), fnorm(self.a2)) / 2.0
+        
+        # Check if intersection is within the circular lenslet
+        if r_from_center > lenslet_radius:
+            # Outside the lenslet area, treat as flat interface
+            return self._propagate_flat_interface(ray, clip)
+        
+        # Calculate the center of curvature for this lenslet
+        if self.otype == 11:  # CC MLA
+            # For concave, use same convention as in _propagate_curv_interface
+            center_of_curvature = np.array([cell_center[0], cell_center[1], self.R])
+            n_local = center_of_curvature - qp_local
+        else:  # CX MLA
+            center_of_curvature = np.array([cell_center[0], cell_center[1], -self.R])
+            n_local = qp_local - center_of_curvature
+        
+        # Normalize the local normal vector
+        n_local = n_local / fnorm(n_local)
+        
+        # Transform the local normal to global coordinates
+        n = self.Rot @ n_local
+        
+        # Determine ray direction using the element's normal
+        ray_direction = dot(s, self.n)
+        
+        # Apply refraction based on ray direction
+        if ray_direction > 0.0:
+            # Ray going from medium 2 to medium 1
+            r = 1.0 / self.nratio
+            c = dot(s, n)
+        else:
+            # Ray going from medium 1 to medium 2
+            r = self.nratio
+            c = -dot(s, n)
+        
+        # Calculate refraction
+        dis = 1 - r**2 * (1 - c**2)
+        
+        # Check for total internal reflection
+        if dis < 0.0:
+            # Total internal reflection
+            sp = s - 2 * dot(s, n) * n
+        else:
+            # Refraction
+            if ray_direction > 0.0:
+                sp = r * s + (math.sqrt(dis) - r * c) * n
+            else:
+                sp = r * s + (r * c - math.sqrt(dis)) * n
+        
+        # Normalize the new direction vector
+        sp = sp / fnorm(sp)
+        
+        # Return the new ray
+        rout = np.vstack((q, sp))
+        return rout
         
     def intersect(self, ray, clip=True):
         if self.otype == 2 or self.otype == 3 or self.otype == 5 or self.otype == 6: #Curved mirror
@@ -378,6 +584,8 @@ class JitOptic(object):
             return self._intersect_free(ray, clip)
         elif self.otype == 9: # asphere thorlabs
             return self._intersect_tfree(ray, clip)
+        elif self.otype == 11 or self.otype == 12:  # MLA
+            return self._intersect_mla(ray, clip)
         else:
             return self._intersect_flat(ray, clip)
         
@@ -396,6 +604,8 @@ class JitOptic(object):
             return self._propagate_free_interface(ray, clip)
         elif self.otype == 9:
             return self._propagate_tfree_interface(ray, clip)
+        elif self.otype == 11 or self.otype == 12:  # MLA
+            return self._propagate_mla(ray, clip)
         else:
             return self._propagate_flat(ray, clip)
         
@@ -447,7 +657,7 @@ class JitOptic(object):
         # Thorlabs asphere form including ROC R (coeffs[0]) and conic constanc c (coeffs [1])
         deg = len(self.coef)-2
         _R = self.coef[0]
-        _k = self.coef[1]
+        k = self.coef[1]
         
         val = r**2/(_R*(1+np.sqrt(1-(1+k)*r**2/_R**2)))
         # the coeff array starts at 2 now, so the total array is
@@ -467,7 +677,7 @@ class JitOptic(object):
         r = np.sqrt(x**2 + y**2)
         deg = len(self.coef)-2
         _R = self.coef[0]
-        _k = self.coef[1]
+        k = self.coef[1]
         
         dx = x/(_R*np.sqrt(1-(r**2*(1+k))/_R**2))
         dy = y/(_R*np.sqrt(1-(r**2*(1+k))/_R**2))
