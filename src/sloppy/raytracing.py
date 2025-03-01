@@ -25,19 +25,57 @@ class RaySystem:
         self.elements = elements
         self.jelements = tuple((el.jopt for el in elements)) #homogenous tuple to support jitted routines
         
+    # @property
+    # def abcd(self):
+    #     pos = [e.p for e in self.elements]
+
+    #     abcd = []
+    #     for i, el in enumerate(self.elements):
+    #         d = np.linalg.norm(pos[i-1]-pos[i])
+    #         if isinstance(el, Glass) or isinstance(el, CurvedGlass) or isinstance(el, FreeFormInterface):
+    #             #modify index of refraction in propagation according to Glass element
+    #             abcd.extend([Prop(d, n=el.n1), ABCD(el.m), ABCD(el.Rbasis)])
+    #         else:
+    #             abcd.extend([Prop(d), ABCD(el.m), ABCD(el.Rbasis)])
+    #     return ABCDSystem(abcd)
+
     @property
     def abcd(self):
-        pos = [e.p for e in self.elements]
+        """Calculate the ABCD matrix respecting element order and direction."""
+        abcd_matrices = []
+        
+        # Start from element after source
+        for i in range(1, len(self.elements)):
+            prev_el = self.elements[i-1]
+            curr_el = self.elements[i]
+            # Calculate direction vector from previous to current element
+            direction = norm(curr_el.p - prev_el.p)
+            
+            # Calculate propagation distance
+            d = np.linalg.norm(curr_el.p - prev_el.p)
+            
+            aligned_with_normal = np.dot(direction, prev_el.n) > 0
+            # print('directions ',curr_el, curr_el.p, prev_el.p, direction, aligned_with_normal)
 
-        abcd = []
-        for i, el in enumerate(self.elements):
-            d = np.linalg.norm(pos[i-1]-pos[i])
-            if isinstance(el, Glass) or isinstance(el, CurvedGlass) or isinstance(el, FreeFormInterface):
-                #modify index of refraction in propagation according to Glass element
-                abcd.extend([Prop(d, n=el.n1), ABCD(el.m), ABCD(el.Rbasis)])
-            else:
-                abcd.extend([Prop(d), ABCD(el.m), ABCD(el.Rbasis)])
-        return ABCDSystem(abcd)
+            # Determine propagation index based on previous element
+            n_prop = 1.0  # Default to air
+            if isinstance(prev_el, Glass):
+                # Determine which index to use based on ray direction
+                n_prop = prev_el.n1 if aligned_with_normal else prev_el.n2
+
+            # print('n_prop from ', prev_el, 'to ', curr_el, 'is ', n_prop)
+            # Add propagation matrix
+            abcd_matrices.append(Prop(d, n=n_prop))
+            
+            # Add element's ABCD matrix
+            _m = curr_el.get_abcd(direction)
+            abcd_matrices.append(ABCD(_m))
+            # print('m ', _m)
+            
+            # Add any basis rotation
+            abcd_matrices.append(ABCD(curr_el.Rbasis))
+        
+        return ABCDSystem(abcd_matrices)
     
     def propagate(self, rays, Nrt=1, at_screen=False, clip=True):
         """Propagate rays through an optical system (series of elements).

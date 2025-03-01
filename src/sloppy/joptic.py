@@ -19,63 +19,6 @@ def dot(a, b):
 def fnorm(v):
     return math.sqrt(dot(v,v))
 
-
-@njit
-def __locate_point_in_lattice(point, a1, a2, origin_centered):
-    """
-    Locate where a point falls in the lattice.
-    
-    Parameters:
-    -----------
-    point : numpy.ndarray
-        The (x, y) coordinates of the point
-    a1, a2 : numpy.ndarray
-        The two basis vectors defining the lattice
-    origin_centered : bool
-        If True, the first unit cell is centered at the origin
-        
-    Returns:
-    --------
-    cell_indices : tuple
-        The indices (i, j) of the unit cell containing the point
-    fractional_coords : numpy.ndarray
-        The fractional coordinates within the unit cell (values between 0 and 1)
-    cell_center : numpy.ndarray
-        The (x, y) coordinates of the center of the identified unit cell
-    """
-    # Calculate reciprocal vectors (inlined)
-    det = a1[0] * a2[1] - a1[1] * a2[0]
-    b1 = np.array([a2[1], -a2[0]]) / det
-    b2 = np.array([-a1[1], a1[0]]) / det
-    
-    # Calculate offset (inlined)
-    offset = -0.5 * (a1 + a2) if origin_centered else np.zeros(2)
-    
-    # Adjust point if lattice is centered
-    adjusted_point = point - offset
-    
-    # Calculate fractional coordinates using dot products with reciprocal lattice vectors
-    frac_1 = adjusted_point[0] * b1[0] + adjusted_point[1] * b1[1]
-    frac_2 = adjusted_point[0] * b2[0] + adjusted_point[1] * b2[1]
-    
-    # Get the cell indices by flooring the fractional coordinates
-    i = int(np.floor(frac_1))
-    j = int(np.floor(frac_2))
-
-    # Calculate the position within the unit cell relative to bottom-left corner
-    corner_frac_coords = np.array([frac_1 - i, frac_2 - j])
-    
-    # Convert to coordinates relative to cell center (-0.5 to 0.5 in each dimension)
-    # This makes the center of the cell (0,0)
-    center_frac_coords = corner_frac_coords - 0.5
-    
-    # Calculate the center of the identified unit cell
-    cell_center = i * a1 + j * a2 + offset + 0.5 * (a1 + a2)
-
-    center_coords = center_frac_coords*a1 + center_frac_coords*a2
-    
-    return (i, j), center_coords, cell_center
-
 """
 Monolithic optic class accelerated with numba
 """
