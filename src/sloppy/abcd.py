@@ -5,36 +5,69 @@ from itertools import product
 
 
 class ABCD:
-    """Base class for ABCD objects.
-    In addition to the matrix it can store element properties.
+    """Base class for ABCD matrices in 2D.
 
+    Parameters
+    ----------
+    m : ndarray
+        4x4 ABCD matrix. If None, returns identity matrix.
     """
     def __init__(self, m):
         if m is None:
-            self.m = np.eye(4)
+            self.m = np.identity(4, dtype=np.float64)
         else:
             self.m = np.array(m)
         
     def __matmul__(self, other):
+        """Matrix multiplication of ABCD matrices.
+
+        Parameters
+        ----------
+        other : ABCD
+            Another ABCD matrix object
+
+        Returns
+        -------
+        ndarray
+            Result of matrix multiplication
+        """
         return self.m@other.m
 
 
 class Prop(ABCD):
     """Propagation through space.
-    Args:
-        L (float): Propagation distance.
-        n (float): Index of refraction of the medium.
+
+    Parameters
+    ----------
+    L : float
+        Propagation distance
+    n : float, optional
+        Index of refraction of the medium, by default 1.0
     """
     def __init__(self, L, n=1.):
         # Returns the ABCD array for propagation through dielectric constant n
         self.L = L
         self.n = n
-        m = np.identity(4)
+        m = np.identity(4, dtype=np.float64)
         m[0,2] = L
         m[1,3] = L
         self.m = m
         
     def aberrations(self, chi, k):
+        """Calculate nonlinear phase terms from propagation.
+
+        Parameters
+        ----------
+        chi : ndarray
+            Array of shape (4, N, N) containing field parameters
+        k : float
+            Wavenumber
+
+        Returns
+        -------
+        float
+            Sum of nonlinear phase terms
+        """
         #shape of chi is (4, N, N)
         x, y, sx, sy = chi
         sx2, sy2 = sx@sx, sy@sy
@@ -48,26 +81,19 @@ class Prop(ABCD):
 
 class Rot(ABCD):
     """Coordinate transformation through rotation.
-    Args:
-        r (ndarray): 2x2 rotation matrix.
+
+    Parameters
+    ----------
+    r : ndarray
+        2x2 rotation matrix
     """
     def __init__(self, r):
         # Returns the ABCD array for basis rotation with 2x2 matrix r
         self.r = r
-        m = np.identity(4)
+        m = np.identity(4, dtype=np.float64)
         m[0:2,0:2] = r
         m[2:4,2:4] = r
         self.m = m
-        
-def ThickLens(d, n1=1., n2=1., R1=None, R2=None):
-    """Composite ABCD matrix for thick lens.
-    Args:
-        R1 (float): Radius of curvature of the first surface (None is flat).
-        R2 (float): Radius of curvature of the second surface (None is flat).
-        n1 (float): Index of refraction outside the lens.
-        n2 (float): Index of refraction inside the lens.
-    """
-    return [Interface(n1, n2, R1), Prop(d, n2), Interface(n2, n1, R2)]
 
 class ABCDSystem:
     """System comprised of 4x4 ABCD matrices of optical elements and propagation in 2D.
@@ -82,13 +108,41 @@ class ABCDSystem:
     """
     @staticmethod
     def abcd_from_x(x, distlist, abcdlist, nlist):
-        """ABCD matrix as a function of position x along the optical axis."""
+        """Get ABCD matrix at position x along optical axis.
+
+        Parameters
+        ----------
+        x : float
+            Position along optical axis
+        distlist : list
+            List of cumulative distances
+        abcdlist : list
+            List of cumulative ABCD matrices
+        nlist : list
+            List of refractive indices
+
+        Returns
+        -------
+        ndarray
+            ABCD matrix at position x
+        """
         idx = np.where(x>=np.array(distlist))[0][-1]
         return Prop(x-distlist[idx], nlist[idx]).m@abcdlist[idx]
     
     @staticmethod
     def get_conj_pairs(ev):
-        """Get the conjugate eigenvectors with the right normalization."""
+        """Get conjugate eigenvector pairs with proper normalization.
+
+        Parameters
+        ----------
+        ev : ndarray
+            Array of eigenvectors
+
+        Returns
+        -------
+        tuple
+            Indices and normalized eigenvectors of conjugate pairs
+        """
         ind = [0, 1, 2, 3]
         indout = []
         evout = []
@@ -108,7 +162,18 @@ class ABCDSystem:
     
     @staticmethod
     def stability(Mrt):
-        """Stability parameter."""
+        """Calculate stability parameter of resonator.
+
+        Parameters
+        ----------
+        Mrt : ndarray
+            Round-trip ABCD matrix
+
+        Returns
+        -------
+        float
+            Stability parameter
+        """
         # seems like maybe the second dimension gives a factor of 2? Maybe we should just use the norm of the eigenvalues
         return np.trace(Mrt)*0.5/2
     
@@ -140,7 +205,7 @@ class ABCDSystem:
         nlist = []
         dtot=0.0
         dOptTot=0.0
-        abcd=np.eye(4)
+        abcd=np.identity(4, dtype=np.float64)
         for ele in self.elements:
             # check if ele is a propagation or other ABCD matrix
             if isinstance(ele, Prop):
@@ -152,6 +217,8 @@ class ABCDSystem:
                 abcd=ele.m@abcd
             else:
                 abcd=ele.m@abcd
+                # set element position
+                ele.x = dtot
 
         abcdlist.append(abcd.copy())
         distlist.append(dtot)
@@ -179,7 +246,18 @@ class ABCDSystem:
         #print("No eigenmode found!")
         
     def M2BiK(self, Mrt):
-        """Get eigenvectors from ABCD matrix and normalize."""
+        """Convert ABCD matrix to normalized eigenvectors.
+
+        Parameters
+        ----------
+        Mrt : ndarray
+            Round-trip ABCD matrix
+
+        Returns
+        -------
+        ndarray
+            Normalized eigenvector matrix
+        """
         # choose properly normalized pair if we can
         G = np.array([[0,0,1,0], [0,0,0,1], [-1,0,0,0], [0,-1,0,0]])
         ev, mus = np.linalg.eig(Mrt)
@@ -259,12 +337,36 @@ class ABCDSystem:
         return self.nlist[idx]
     
     def waist_at(self, x):
-        """Get waists at position x on the optical axis."""
+        """Calculate beam waists at position x.
+
+        Parameters
+        ----------
+        x : float
+            Position along optical axis
+
+        Returns
+        -------
+        ndarray
+            Beam waists in both transverse dimensions
+        """
         qp = self.propBiK(self.q, self.abcd_at(x))
         return self.solve_mode(qp, self.n_at(x))
     
     def compute_waists(self, x, qin=None):
-        """Get waists at array of positions x on the optical axis."""
+        """Calculate beam waists at multiple positions.
+
+        Parameters
+        ----------
+        x : ndarray
+            Array of positions along optical axis
+        qin : ndarray, optional
+            Input q parameter, by default None
+
+        Returns
+        -------
+        ndarray
+            Array of beam waists at each position
+        """
         if qin is None:
             qin = self.q
         ws = np.zeros((x.shape[0], 2))
@@ -277,6 +379,18 @@ class ABCDSystem:
         return self.propBiK(self.q, self.abcd_at(x))
         
     def get_freqs(self, s=3):
+        """Get transverse mode frequencies.
+
+        Parameters
+        ----------
+        s : int, optional
+            Scaling factor, by default 3
+
+        Returns
+        -------
+        tuple
+            Frequencies and wrapped frequencies
+        """
         return self.M2freq(self.abcd_rt, s=s)
     
     def make_realspace(self, a=5., b=None, N=200):

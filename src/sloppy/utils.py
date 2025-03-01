@@ -86,7 +86,7 @@ def geometry(mir):
     #make R 4x4
     R4 = np.zeros((R.shape[0], 4, 4))
     for i in range(R.shape[0]):
-        m = np.identity(4)
+        m = np.identity(4, dtype=np.float64)
         r = R[i]@changeBasisAcross[i]
         m[0:2,0:2] = r
         m[2:4,2:4] = r
@@ -142,7 +142,7 @@ def geometry_old(mir):
     #make R 4x4
     R4 = np.zeros((R.shape[0], 4, 4))
     for i in range(R.shape[0]):
-        m = np.identity(4)
+        m = np.identity(4, dtype=np.float64)
         r = R[i]
         m[0:2,0:2] = r
         m[2:4,2:4] = r
@@ -205,7 +205,7 @@ def getrot(a,b):
 
 def pad3to4(mat):
     """Pad 3x3 roation to 4x4 matrix (for k3d)."""
-    m = np.identity(4)
+    m = np.identity(4, dtype=np.float64)
     m[0:3,0:3] = mat
     return m
 
