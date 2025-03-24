@@ -13,39 +13,48 @@ class ConvergenceError(Exception):
     pass
 
 class RaySystem:
-    def __init__(self, elements, add_screen=True):
+    def __init__(self, elements, add_screen=True, old_mode=False):
+        self.old_mode = old_mode
         if add_screen:
-            #add screen to elements
-            x0 = 0.5*(elements[0].p + elements[-1].p)
-            n0 = norm(elements[0].p - elements[-1].p)
+            #check if last element is a screen already
+            if isinstance(elements[-1], Screen):
+                screen = elements[-1]
+            else:
+                #add screen to elements
+                x0 = 0.5*(elements[0].p + elements[-1].p)
+                # n0 = norm(elements[0].p - elements[-1].p)
+                n0 = elements[0].n
 
-            screen = Screen(p=x0, n=n0, diameter=10., ax=elements[0].ax, ay=elements[0].ay)
-            elements.append(screen)
+                screen = Screen(p=x0, n=n0, diameter=10., ax=elements[0].ax, ay=elements[0].ay)
+                elements.append(screen)
             self.screen = screen
         self.elements = elements
         self.jelements = tuple((el.jopt for el in elements)) #homogenous tuple to support jitted routines
         
     # @property
-    # def abcd(self):
-    #     pos = [e.p for e in self.elements]
+    def _old_abcd(self):
+        pos = [e.p for e in self.elements]
 
-    #     abcd = []
-    #     for i, el in enumerate(self.elements):
-    #         d = np.linalg.norm(pos[i-1]-pos[i])
-    #         if isinstance(el, Glass) or isinstance(el, CurvedGlass) or isinstance(el, FreeFormInterface):
-    #             #modify index of refraction in propagation according to Glass element
-    #             abcd.extend([Prop(d, n=el.n1), ABCD(el.m), ABCD(el.Rbasis)])
-    #         else:
-    #             abcd.extend([Prop(d), ABCD(el.m), ABCD(el.Rbasis)])
-    #     return ABCDSystem(abcd)
+        abcd = []
+        for i, el in enumerate(self.elements):
+            d = np.linalg.norm(pos[i-1]-pos[i])
+            if isinstance(el, Glass) or isinstance(el, CurvedGlass) or isinstance(el, FreeFormInterface):
+                #modify index of refraction in propagation according to Glass element
+                abcd.extend([Prop(d, n=el.n1), ABCD(el.m), ABCD(el.Rbasis)])
+            else:
+                abcd.extend([Prop(d), ABCD(el.m), ABCD(el.Rbasis)])
+        return ABCDSystem(abcd)
 
     @property
     def abcd(self):
         """Calculate the ABCD matrix respecting element order and direction."""
+        if self.old_mode:
+            return self._old_abcd()
         abcd_matrices = []
         
         # Start from element after source
-        for i in range(1, len(self.elements)):
+        # for i in range(1, len(self.elements)):
+        for i in range(len(self.elements)):
             prev_el = self.elements[i-1]
             curr_el = self.elements[i]
             # Calculate direction vector from previous to current element
@@ -54,22 +63,29 @@ class RaySystem:
             # Calculate propagation distance
             d = np.linalg.norm(curr_el.p - prev_el.p)
             
-            aligned_with_normal = np.dot(direction, prev_el.n) > 0
+            
+            aligned_with_normal = np.dot(direction, curr_el.n) > 0
             # print('directions ',curr_el, curr_el.p, prev_el.p, direction, aligned_with_normal)
+            # print(f"element {curr_el}, pos {curr_el.p}, dist {d}, prev pos {prev_el.p}, normal {curr_el.n}, prev normal {prev_el.n}, direction {direction}, aligned {aligned_with_normal}")
 
             # Determine propagation index based on previous element
             n_prop = 1.0  # Default to air
+            prev_aligned_with_normal = np.dot(direction, prev_el.n) > 0
             if isinstance(prev_el, Glass):
                 # Determine which index to use based on ray direction
-                n_prop = prev_el.n1 if aligned_with_normal else prev_el.n2
+                # n_prop = prev_el.n1 if aligned_with_normal else prev_el.n2
+                n_prop = prev_el.n1 if prev_aligned_with_normal else prev_el.n2
+                # print(f"n_prop from {prev_el} to {curr_el} is {n_prop}")
 
             # print('n_prop from ', prev_el, 'to ', curr_el, 'is ', n_prop)
             # Add propagation matrix
-            abcd_matrices.append(Prop(d, n=n_prop))
+            _m = Prop(d, n=n_prop)
+            # print(f"propagation matrix {_m.m}")
+            abcd_matrices.append(_m)
             
             # Add element's ABCD matrix
-            _m = curr_el.get_abcd(direction)
-            abcd_matrices.append(ABCD(_m))
+            _m2 = curr_el.get_abcd(direction)
+            abcd_matrices.append(ABCD(_m2))
             # print('m ', _m)
             
             # Add any basis rotation
@@ -262,17 +278,22 @@ class RaySystem:
         s = x[:,1:]@c/np.sum(c)
         return s
     
-    def find_eigenray_mpe(self, ray0, lr=0.03, Niter=50, Nmpe=5, tol=1e-9, get_tols=False, **kwargs):
-        """Version of :function:`find_eigenray` that uses MPE to accelerate convergence.
-
+    def find_eigenray_mpe(self, ray0, lr=0.03, Niter=50, Nmpe=5, tol=1e-9, get_tols=False, lr_decay=0.9, **kwargs):
+        """Find eigenray using Minimal Polynomial Extrapolation.
+        
+        This method uses the MPE function to accelerate convergence.
+        
         Args:
-            Nrt (int): Number of roundtrips to propagate between iteration steps.
-            Niter (int): Number of iterations of the inner (iterative) fixpoint algorithm.
-            Nmpe (int): Number of iterations of the outer (MPE) fixpoint algorithm.
+            ray0 (ndarray): Input rays to stabilize of shape (2, Nrays, 3).
+            Niter (int): Number of iterations.
+            Nmpe (int): Number of MPE steps.
             tol (float): Tolerance (relative change) down to which to iterate.
-
+            lr (float): 'learning rate', must be hand-tuned.
+            lr_decay (float): Decay factor for learning rate.
+            get_tols (bool): If true, return tolerance history.
+            
         Returns:
-            rnew (ndarray): Eigenray of the system (2, Nrays, 3).
+            rcur (ndarray): Eigenray of the system (2, Nrays, 3).
         """
         rnew = ray0.copy()
         alltols = []
@@ -299,16 +320,21 @@ class RaySystem:
             return rnew
         
     def find_eigenray_mpe_dev(self, ray0, lr=0.03, Niter=50, Nmpe=5, tol=1e-9, get_tols=False, lr_decay=0.9, **kwargs):
-        """Version of :function:`find_eigenray` that uses MPE to accelerate convergence.
-
+        """Development version of find_eigenray_mpe.
+        
+        This method uses the MPE function to accelerate convergence.
+        
         Args:
-            Nrt (int): Number of roundtrips to propagate between iteration steps.
-            Niter (int): Number of iterations of the inner (iterative) fixpoint algorithm.
-            Nmpe (int): Number of iterations of the outer (MPE) fixpoint algorithm.
+            ray0 (ndarray): Input rays to stabilize of shape (2, Nrays, 3).
+            Niter (int): Number of iterations.
+            Nmpe (int): Number of MPE steps.
             tol (float): Tolerance (relative change) down to which to iterate.
-
+            lr (float): 'learning rate', must be hand-tuned.
+            lr_decay (float): Decay factor for learning rate.
+            get_tols (bool): If true, return tolerance history.
+            
         Returns:
-            rnew (ndarray): Eigenray of the system (2, Nrays, 3).
+            rcur (ndarray): Eigenray of the system (2, Nrays, 3).
         """
         rnew = ray0.copy()
         alltols = []

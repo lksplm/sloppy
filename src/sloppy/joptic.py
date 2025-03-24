@@ -252,6 +252,73 @@ class JitOptic(object):
         q_curved = self.Rot @ qp_curved + self.p
         
         return q_curved
+    
+    def _intersect_parabola(self, ray, clip=True):
+        """Intersect ray with off-axis parabolic mirror segment."""
+        r = ray[0,:]
+        s = ray[1,:]
+        
+        # Transform ray to local coordinates
+        
+        r_local = self.RotT @ (r - self.p)
+        s_local = self.RotT @ s
+
+        #get parabola parameters out of coef
+        parent_focal_length = self.coef[0]
+        y_offset = self.coef[1]
+
+        # The parabola equation: z = (x² + (y+y_offset)²) / (4*focal_length)
+        # Where vertex is at (0, -y_offset, 0) and P is at origin in local coordinates
+        
+        # Ray equation: r_local + t*s_local
+        # Solving for intersection:
+        c = -0.25*(r_local[0]**2 - 4*parent_focal_length*r_local[2] + (r_local[1] + y_offset)**2)/parent_focal_length
+        b = -0.5*(r_local[0]*s_local[0] - 2*parent_focal_length*s_local[2] + (r_local[1] + y_offset)*s_local[1])/parent_focal_length
+        a = -0.25*(s_local[0]**2 + s_local[1]**2)/parent_focal_length
+        
+        # Solve quadratic equation
+        discriminant = b**2 - 4*a*c
+
+
+        if discriminant < 0:
+            # No intersection or parallel to surface
+            return r*np.inf
+        
+        if abs(a) < 1e-10:
+            # Linear case
+            if b == 0:
+                # Both a and b are zero, ray is parallel to surface
+                return r*np.inf
+            t = -c/b
+            return r + t*s
+        else:
+            # Quadratic case
+            t1 = (-b + math.sqrt(discriminant)) / (2*a)
+            t2 = (-b - math.sqrt(discriminant)) / (2*a)
+            # Choose the solution with smallest positive t
+            if t1 > 0 and t2 > 0:
+                t = min(t1, t2)
+            elif t1 > 0:
+                t = t1
+            elif t2 > 0:
+                t = t2
+            else:
+                # Both solutions are behind the ray origin
+                return r*np.inf
+        
+        # Calculate intersection point in local coordinates
+        q_local = r_local + t * s_local
+        
+        # Check if intersection is within the mirror segment aperture
+        if clip:
+            # Check if point is within the circular aperture centered at origin
+            dist_from_center = math.sqrt(q_local[0]**2 + q_local[1]**2)
+            if dist_from_center > self.rapt:
+                return r*np.inf
+        
+        # Transform intersection point back to global coordinates
+        q = self.Rot @ q_local + self.p
+        return q
         
     def _propagate_flat(self, ray, clip=True):
         q = self._intersect_flat(ray, clip=clip)
@@ -449,7 +516,9 @@ class JitOptic(object):
         """Propagate through a microlens array."""
         # Get intersection point
         q = self._intersect_mla(ray, clip=clip)
+        # print(f"intersecting MLA at {q[0]}, {q[1]}, {q[2]}")
         if np.isinf(q[0]):
+            print(f"intersecting MLA at {q[0]}, {q[1]}, {q[2]}, missed")
             return ray * np.inf  # Ray missed the surface
             
         s = ray[1,:]
@@ -469,7 +538,9 @@ class JitOptic(object):
         # Check if intersection is within the circular lenslet
         if r_from_center > lenslet_radius:
             # Outside the lenslet area, treat as flat interface
-            return self._propagate_flat_interface(ray, clip)
+            print("Outside the lenslet area, {r_from_center} > {lenslet_radius}")
+            return ray * np.inf  # Ray missed the surface
+            # return self._propagate_flat_interface(ray, clip)
         
         # Calculate the center of curvature for this lenslet
         if self.otype == 11:  # CC MLA
@@ -486,38 +557,89 @@ class JitOptic(object):
         # Transform the local normal to global coordinates
         n = self.Rot @ n_local
         
-        # Determine ray direction using the element's normal
-        ray_direction = dot(s, self.n)
+        # # Determine ray direction using the element's normal
+        # ray_direction = dot(s, self.n)
         
-        # Apply refraction based on ray direction
-        if ray_direction > 0.0:
-            # Ray going from medium 2 to medium 1
-            r = 1.0 / self.nratio
-            c = dot(s, n)
-        else:
-            # Ray going from medium 1 to medium 2
+        # # Apply refraction based on ray direction
+        # if ray_direction > 0.0:
+        #     # Ray going from medium 2 to medium 1
+        #     r = 1.0 / self.nratio
+        #     c = dot(s, n)
+        # else:
+        #     # Ray going from medium 1 to medium 2
+        #     r = self.nratio
+        #     c = -dot(s, n)
+        
+        # # Calculate refraction
+        # dis = 1 - r**2 * (1 - c**2)
+        
+        # # Check for total internal reflection
+        # if dis < 0.0:
+        #     # Total internal reflection
+        #     sp = s - 2 * dot(s, n) * n
+        # else:
+        #     # Refraction
+        #     if ray_direction > 0.0:
+        #         sp = r * s + (math.sqrt(dis) - r * c) * n
+        #     else:
+        #         sp = r * s + (r * c - math.sqrt(dis)) * n
+        
+        # make sure there is always transmission and no reflection!
+        c = -dot(s, self.n)
+        if c>0.0: #normal case, ray is coming from medium 1 and refracted into medium 2
             r = self.nratio
-            c = -dot(s, n)
+            dis = 1 - r**2*(1 - c**2) #prevent total internal reflection?
+            sp = r*s + (r*c - math.sqrt(dis))*n
+        else: #reversed case, ray is comming from the other direction! reverse normal vec and ior ratio!
+            r = 1.0/self.nratio
+            c = -c
+            dis = 1 - r**2*(1 - c**2)#prevent total internal reflection?
+            sp = r*s + (math.sqrt(dis) - r*c)*n
         
-        # Calculate refraction
-        dis = 1 - r**2 * (1 - c**2)
-        
-        # Check for total internal reflection
-        if dis < 0.0:
-            # Total internal reflection
-            sp = s - 2 * dot(s, n) * n
-        else:
-            # Refraction
-            if ray_direction > 0.0:
-                sp = r * s + (math.sqrt(dis) - r * c) * n
-            else:
-                sp = r * s + (r * c - math.sqrt(dis)) * n
-        
-        # Normalize the new direction vector
-        sp = sp / fnorm(sp)
+        sp = sp/fnorm(sp)
         
         # Return the new ray
         rout = np.vstack((q, sp))
+        return rout
+    
+    def _propagate_parabola(self, ray, clip=True):
+        """Propagate ray after reflection from off-axis parabolic mirror."""
+        # First get intersection point
+        q = self._intersect_parabola(ray, clip=clip)
+        
+        #get parabola parameters out of coef
+        parent_focal_length = self.coef[0]
+        y_offset = self.coef[1]
+
+        if np.isinf(q[0]):
+            # No valid intersection
+            return ray*np.inf
+            
+        s = ray[1,:]
+        
+        # Transform to local coordinates
+        q_local = self.RotT @ (q - self.p)
+        
+        # Calculate normal vector at intersection point
+        # For a parabola z = (x² + y²)/(4f), the normal is proportional to:
+        # n = (-x, -y, 2f)
+        # Adjust for the off-axis position:
+        normal_local = np.array([
+            -q_local[0], 
+            -(q_local[1] + y_offset), 
+            2*parent_focal_length
+        ])
+        normal_local = normal_local / fnorm(normal_local)
+        
+        # Transform normal to global coordinates
+        normal = self.Rot @ normal_local
+        
+        # Calculate reflection using the standard mirror reflection formula
+        s_reflected = s - 2 * dot(s, normal) * normal
+        s_reflected = s_reflected / fnorm(s_reflected)
+        
+        # Return reflected ray
+        rout = np.vstack((q, s_reflected))
         return rout
         
     def intersect(self, ray, clip=True):
@@ -529,6 +651,8 @@ class JitOptic(object):
             return self._intersect_tfree(ray, clip)
         elif self.otype == 11 or self.otype == 12:  # MLA
             return self._intersect_mla(ray, clip)
+        elif self.otype == 13:  # Off-axis parabolic mirror
+            return self._intersect_parabola(ray, clip)
         else:
             return self._intersect_flat(ray, clip)
         
@@ -549,6 +673,8 @@ class JitOptic(object):
             return self._propagate_tfree_interface(ray, clip)
         elif self.otype == 11 or self.otype == 12:  # MLA
             return self._propagate_mla(ray, clip)
+        elif self.otype == 13:  # Off-axis parabolic mirror
+            return self._propagate_parabola(ray, clip)
         else:
             return self._propagate_flat(ray, clip)
         

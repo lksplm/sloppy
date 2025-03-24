@@ -274,5 +274,41 @@ intersphinx_mapping = {
 }
 
 def setup(app):
+    sys.path.insert(0, __location__)
     from k3d_plot import K3D_Plot
     app.add_directive('k3d_plot', K3D_Plot)
+    
+    # Import k3d package to get access to its static files
+    try:
+        import k3d
+        k3d_path = os.path.dirname(k3d.__file__)
+        
+        # Copy k3d static files to _static directory
+        static_dir = os.path.join(__location__, '_static')
+        os.makedirs(static_dir, exist_ok=True)
+        
+        # Copy required JS files
+        for js_file in ['require.js', 'standalone.js']:
+            src = os.path.join(k3d_path, 'static', js_file)
+            dst = os.path.join(static_dir, js_file)
+            if os.path.exists(src) and not os.path.exists(dst):
+                shutil.copy(src, dst)
+                
+        # Create a simple style.css if it doesn't exist
+        css_file = os.path.join(static_dir, 'style.css')
+        if not os.path.exists(css_file):
+            with open(css_file, 'w') as f:
+                f.write('/* K3D custom styles */\n')
+        
+        # Add the static files to Sphinx
+        try:
+            app.add_css_file('style.css')
+            app.add_js_file('require.js')
+            app.add_js_file('standalone.js')
+        except AttributeError:
+            app.add_stylesheet('style.css')
+            app.add_javascript('require.js')
+            app.add_javascript('standalone.js')
+                
+    except ImportError:
+        print("Warning: k3d package not found. K3D plots may not render correctly.")

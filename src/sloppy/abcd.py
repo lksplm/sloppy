@@ -47,9 +47,9 @@ class Prop(ABCD):
     def __init__(self, L, n=1.):
         # Returns the ABCD array for propagation through dielectric constant n
         self.L = L
-        self.n = n
+        self.n = n # the n is just stored for bookkeeping
         m = np.identity(4, dtype=np.float64)
-        m[0,2] = L
+        m[0,2] = L # no n here!
         m[1,3] = L
         self.m = m
         
@@ -233,6 +233,10 @@ class ABCDSystem:
         self.Ltot = dtot
         self.LOptot = dOptTot
         self.fsr = 2.99792458e8/(dOptTot*1e-3)
+
+        # the determinant of the ABCD matrix should be 1, otherwise there is a mismatch in indices of refraction!
+        if not np.allclose(np.linalg.det(self.abcd_rt), 1):
+            raise ValueError("The determinant of the ABCD matrix is not 1, there is a mismatch in indices of refraction!")
         
         self.abcd_fct = lambda x: self.abcd_from_x(x, distlist, abcdlist, nlist)
         

@@ -172,12 +172,12 @@ class CurvedMirror(Optic):
     Args:
         R (float): Radius of curvature, always positive!
         curv (string): 'CC' or 'CX' always w.r.t. to the normal vector.
-            Schematically this looks like this (<- is normal):
-                CC: ----- <-)
-                CX: ----- <-(
+        
+        Schematically this looks like this (<- is normal):
+            CC: ----- <-)
+            CX: ----- <-(
         thet (float): angle of reflection for the ABCD matrix in sagital/tangential plane.
         TODO: Implement thet
-
     """
     def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, R=1., curv='CC', thet=0., Rbasis=np.identity(4, dtype=np.float64)):
         
@@ -205,7 +205,30 @@ class CurvedMirror(Optic):
         mesh.transform.translation = self.p
         mesh.transform.custom_matrix = pad3to4(self.Rot).astype(np.float32)
         return mesh
-    
+
+class FreeFormMirror(Mirror):
+    """Free form radially symmetric optic of the form z = \sum_i=0^deg coef[i] r**i
+    Args:
+        coef (ndarray): coefficients
+    """
+    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, Rbasis=np.identity(4, dtype=np.float64), coef=np.zeros(3)):
+        self.coef = coef
+        super().__init__(p=p, n=n, ax=ax, ay=ay, diameter=diameter, Rbasis=Rbasis)
+        
+        
+    def _init_jopt(self):
+        self.jopt = JitOptic(p=self.p, n=self.n, ax=self.ax, ay=self.ay, Rot=self.Rot, rapt=self.rapt, coef=self.coef, otype=7)
+
+
+    def plot(self, n_radii = 10, n_angles = 10, **kwargs):
+        x, y = disc_coords(n_radii = n_radii, n_angles = n_angles, R=self.rapt)
+        z = np.polyval(self.coef[::-1], np.sqrt(x**2 + y**2))
+        indices = Triangulation(x,y).triangles.astype(np.uint32)
+        mesh = k3d.mesh(np.vstack([x,y,z]).T, indices, **kwargs)
+        mesh.transform.translation = self.p
+        mesh.transform.custom_matrix = pad3to4(self.Rot).astype(np.float32)
+        return mesh
+
 class Glass(Optic):
     """Interface in the indecies of refraction i.e. a glass surface.
     Args:
@@ -242,28 +265,20 @@ class Glass(Optic):
         return m
         
 class CurvedGlass(Glass):
-    """Curved refracting surface, can be conccave ('CC') or convex ('CX').
-
-    R (float): Radius of curvature, always positive!
-    curv (string): 'CC' or 'CX' always w.r.t. to the normal vector.
-    Schematically this looks like this:
-        CC: ----- <-)
-        CX: ----- <-(
-    thet (float): angle of reflection for the ABCD matrix in sagital/tangential plane.
-    n1 (float): Index of refraction before the interface.
-    n2 (float): Index of refraction after the interface.
+    """Curved glass interface, can be conccave ('CC') or convex ('CX').
     
-    TODO: Implement thet
-
+    Args:
+        R (float): Radius of curvature, always positive!
+        curv (string): 'CC' or 'CX' always w.r.t. to the normal vector.
+        
+        Schematically this looks like this (<- is normal):
+            CC: ----- <-)
+            CX: ----- <-(
     """
     def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, R=1., curv='CC', n1=1., n2=1., Rbasis=np.identity(4, dtype=np.float64)):
-        self.n1 = n1
-        self.n2 = n2
-        self.nratio = n1/n2
         self.R = R
         self.curv = curv
         super().__init__(p=p, n=n, ax=ax, ay=ay, diameter=diameter, n1=n1, n2=n2, Rbasis=Rbasis)
-
 
     def _init_jopt(self):
         if self.curv == 'CC':
@@ -344,31 +359,8 @@ class CurvedGlass(Glass):
         
         return sph4
     
-class FreeFormMirror(Mirror):
-    """Free form radially symmetric optic of the form z = \sum_i=0^deg coef[i] r**i
-    Args:
-        coef (ndarray): coefficients
-    """
-    def __init__(self, p=(0., 0., 0.), n=(0., 0. ,1.), ax=(1., 0. , 0.), ay=(0., 1., 0.), diameter=1.0, Rbasis=np.identity(4, dtype=np.float64), coef=np.zeros(3)):
-        self.coef = coef
-        super().__init__(p=p, n=n, ax=ax, ay=ay, diameter=diameter, Rbasis=Rbasis)
-        
-        
-    def _init_jopt(self):
-        self.jopt = JitOptic(p=self.p, n=self.n, ax=self.ax, ay=self.ay, Rot=self.Rot, rapt=self.rapt, coef=self.coef, otype=7)
-
-
-    def plot(self, n_radii = 10, n_angles = 10, **kwargs):
-        x, y = disc_coords(n_radii = n_radii, n_angles = n_angles, R=self.rapt)
-        z = np.polyval(self.coef[::-1], np.sqrt(x**2 + y**2))
-        indices = Triangulation(x,y).triangles.astype(np.uint32)
-        mesh = k3d.mesh(np.vstack([x,y,z]).T, indices, **kwargs)
-        mesh.transform.translation = self.p
-        mesh.transform.custom_matrix = pad3to4(self.Rot).astype(np.float32)
-        return mesh
-    
 class FreeFormInterface(CurvedGlass):
-    """Free form radially symmetric optic of the form z = \sum_i=0^deg coef[i] r**i
+    """Free form radially symmetric optic of the form z = \\sum_i=0^deg coef[i] r**i
     Args:
         coef (ndarray): coefficients
     """
@@ -552,8 +544,112 @@ class MicroLensArray(CurvedGlass):
         mesh.transform.translation = self.p
         mesh.transform.custom_matrix = pad3to4(self.Rot).astype(np.float32)
         return mesh
-    
+
 class OffAxisParabolicMirror(CurvedMirror):
+    """Off-axis parabolic mirror segment.
+    
+    This implements an off-axis segment of a parabolic mirror as shown in the diagram.
+    The point P (position parameter) corresponds to the center of the mirror segment.
+    
+    Attributes:
+        efl: Effective focal length (from mirror center to focal point)
+        angle: Angle between central ray and optical axis
+        diameter: Diameter of the mirror segment
+    """
+    
+    def __init__(self, p=(0., 0., 0.), n=(0., 0., 1.), ax=(1., 0., 0.), ay=(0., 1., 0.), 
+                 diameter=1.0, efl=1.0, angle=np.radians(30), Rbasis=np.eye(4)):
+        """Initialize the off-axis parabolic mirror.
+        
+        Args:
+            p: Position of the mirror segment center (point P in diagram)
+            n: Normal vector at the center of the mirror segment
+            ax, ay: Local coordinate system vectors
+            diameter: Diameter of the mirror segment
+            efl: Effective focal length (reflected EFL in diagram)
+            angle: Angle between central ray and axis in radians
+            Rbasis: Rotation basis
+        """
+        # Store the parameters
+        self.efl = efl
+        self.angle = angle
+        
+        # Calculate parent focal length and y-offset
+        # self.parent_focal_length = self.efl / np.cos(self.angle)
+        # self.y_offset = self.parent_focal_length * np.sin(self.angle)
+        # (see https://theengineer.markallengroup.com/production/content/uploads/2013/03/Off-axis_Paraboloid_Alignment_Procedure.pdf)
+        self.parent_focal_length = self.efl *np.cos(self.angle/2)**2
+        self.y_offset = 2 * self.parent_focal_length * np.tan(self.angle/2)
+        
+        # Calculate parameters A, B, C from the diagram
+        self.A = self.parent_focal_length * np.sin(self.angle) * np.tan(self.angle/2)
+        self.B = self.efl  # Reflected EFL is B in the diagram
+        self.C = self.parent_focal_length * np.sin(self.angle)**2 / (1 + np.cos(self.angle))
+        
+        
+        # Initialize the parent class with the effective radius
+        super().__init__(p=p, n=n, ax=ax, ay=ay, diameter=diameter, R=self.Reff, curv='CC', Rbasis=Rbasis)
+    
+    def _init_jopt(self):
+        # Override the standard jopt with our custom JitOptic
+        self.jopt = JitOptic(
+            p=self.p, n=self.n, ax=self.ax, ay=self.ay, Rot=self.Rot, 
+            rapt=self.rapt, R=self.Reff, coef=np.array([self.parent_focal_length, self.y_offset]), otype=13)
+        
+    @property
+    def Reff(self):
+        # Calculate the effective radius of curvature at the center point
+        # For a parabola, local R = 2 * parent_focal_length / (cos(θ))^3 at off-axis point
+        return 2 * self.parent_focal_length / (np.cos(self.angle)**3)
+        
+    def _get_focal_point(self):
+        """Calculate the focal point location in global coordinates."""
+        # Focal point is efl distance from P along the central reflected ray
+        # Central reflected ray direction is at angle 2*theta from axis
+        central_ray_dir = np.array([
+            np.sin(2*self.angle), 
+            0, 
+            np.cos(2*self.angle)
+        ])
+        # Transform to global coordinates
+        central_ray_dir = self.Rot @ central_ray_dir
+        
+        # Focal point is efl distance from P along central ray direction
+        focal_point = self.p + self.efl * central_ray_dir
+        return focal_point
+        
+    def plot(self, n_radii=10, n_angles=10, **kwargs):
+        """Plot the off-axis parabolic mirror segment."""
+        import k3d
+        from matplotlib.tri import Triangulation
+        
+        # Generate coordinates in local frame
+        x, y = disc_coords(n_radii=n_radii, n_angles=n_angles, R=self.rapt)
+        
+        # Calculate z based on parabolic equation in local coordinates
+        # The equation of a parabola with focus at origin is: z = (x² + y²)/(4*f)
+        # Adjusted for off-axis segment where vertex is at (-y_offset, 0, 0)
+        # and point P is at (0, 0, 0) in local coordinates
+        
+        # Shift coordinates to place vertex at origin
+        x_shifted = x 
+        y_shifted = y + self.y_offset
+        
+        # Calculate z using parabolic equation relative to vertex
+        z = (x_shifted**2 + y_shifted**2) / (4 * self.parent_focal_length)
+        
+        # Shift z to place point P at z=0
+        z_center = 0#(self.y_offset**2) / (4 * self.parent_focal_length)
+        z = z - z_center
+        
+        indices = Triangulation(x, y).triangles.astype(np.uint32)
+        mesh = k3d.mesh(np.vstack([x, y, z]).T, indices, **kwargs)
+        mesh.transform.translation = self.p
+        mesh.transform.custom_matrix = pad3to4(self.Rot).astype(np.float32)
+        return mesh
+
+
+class __OffAxisParabolicMirror(CurvedMirror):
     """Off-axis parabolic mirror segment.
     
     This implements an off-axis segment of a parabolic mirror as shown in the diagram.

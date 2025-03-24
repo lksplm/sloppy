@@ -6,7 +6,8 @@ from scipy.optimize import minimize, minimize_scalar
 from functools import partial
 from ipywidgets import Layout, IntSlider, FloatLogSlider, FloatSlider, interactive, fixed
 
-magnitude = lambda x: 1. if x==0. else int(np.floor(np.log10(x)))
+# magnitude = lambda x: 1. if x==0. else int(np.floor(np.log10(x)))
+magnitude = lambda x: 1. if abs(x)<0.1 else int(np.floor(np.log10(abs(x))))
 
 def waist_vs_l(cavfct, cavpars, Npts=500):
     elements = cavfct(**cavpars)
@@ -37,7 +38,7 @@ def degeneracy_length(cavfct, parname, scanrange=1e-3, s=3, degmodenum=1):
     res = minimize_scalar(get_freq, bounds=((1-scanrange)*La, (1+scanrange)*La), method='bounded')
     return res
 
-def cavity_parameter_interaction_factory(cavfct, parname, scanrange, N = 300):
+def cavity_parameter_interaction_factory(cavfct, parname, scanrange, N = 300, s=1):
     fig, ax = plt.subplots(ncols=2, figsize=(8,4), sharex=True)
     lws = [ax[0].plot([0, 1], [0, 1])[0] for i in range(2)]
     ax[0].set_ylabel('um')
@@ -49,7 +50,7 @@ def cavity_parameter_interaction_factory(cavfct, parname, scanrange, N = 300):
     plt.show()
     
     def update_waists_vs_params(cavfct, parname, scanrange, N = 300, **kwargs):
-        stab = lambda m: abs(0.5*np.trace(m))<1
+        stab = lambda m: abs(0.25*np.trace(m))<1
 
         La = kwargs[parname]
         Las = La + np.linspace(-scanrange*La, scanrange*La, N)
@@ -71,7 +72,7 @@ def cavity_parameter_interaction_factory(cavfct, parname, scanrange, N = 300):
             else:
                 ms[i] = stab(system.abcd_rt)
                 ws[i,:] = np.sort(w)
-                freqs[i,...] = np.concatenate(system.get_freqs())
+                freqs[i,...] = np.concatenate(system.get_freqs(s=s))
                 #ft, fs3 = system.get_freqs()
                 #fsr = system.fsr
                 #freqs[i,...] = np.concatenate((ft, np.mod(3*ft, fsr)))
@@ -89,9 +90,15 @@ def cavity_parameter_interaction_factory(cavfct, parname, scanrange, N = 300):
         fig.canvas.draw_idle()
 
     lo = Layout(width='80%', height='30px')
-    sliders = {v.name: FloatSlider(value=v.default, min=v.default*0.5, max=v.default*1.5, step=10**(magnitude(v.default)-2), readout_format='.2e', layout=lo) for v in inspect.signature(cavfct).parameters.values()}
+    _sgn = lambda x: 1 if x>0 else -1
+    _min = lambda x: -1 if x==0 else (10*x if x<0 else 0.1*x)
+    _max = lambda x: 1 if x==0 else (0.1*x if x<0 else 10*x)
+
+    # sliders = {v.name: FloatSlider(value=v.default, min=v.default*0.5, max=v.default*1.5, step=10**(magnitude(v.default)-2), readout_format='.2e', layout=lo) for v in inspect.signature(cavfct).parameters.values()}
+    sliders = {v.name: FloatSlider(value=v.default, min=_min(v.default), max=_max(v.default), step=10**(magnitude(v.default)-2), readout_format='.2e', layout=lo) for v in inspect.signature(cavfct).parameters.values() if not v.name.endswith('_thick') }
+
     sliders.update({'scanrange': FloatLogSlider(value=scanrange, min=-3, max=1, step=0.5, layout=lo)})
-    return interactive(update_waists_vs_params, cavfct=fixed(cavfct), parname = fixed('lens_dist'), N=fixed(N), **sliders)
+    return interactive(update_waists_vs_params, cavfct=fixed(cavfct), parname = fixed(parname), N=fixed(N), **sliders)
 
 
 def waists_vs_param(cavfct, parname, scanrange, N=300, degmodenum=1, s=3):
