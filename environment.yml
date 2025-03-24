@@ -13,7 +13,3 @@ dependencies:
   - numba
   - numpy
   - python
-  - pip
-  - pip:
-    - https://github.com/lksplm/sloppy/archive/master.zip
-prefix: /Users/lukas/anaconda3/envs/sloppymodern
