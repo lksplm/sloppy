@@ -15,5 +15,5 @@ dependencies:
   - python
   - pip
   - pip:
-    - git+https://github.com/lksplm/sloppy.git
+    - https://github.com/lksplm/sloppy/archive/master.zip
 prefix: /Users/lukas/anaconda3/envs/sloppymodern
