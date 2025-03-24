@@ -3,13 +3,13 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - datashader
-  - hvplot
+  - datashader=0.17.*
+  - hvplot=1.20.*
   - ipykernel
   - ipympl
   - ipywidgets
-  - k3d
+  - k3d=2.16.*
   - matplotlib
   - numba
   - numpy
-  - python
+  - python=3.10
