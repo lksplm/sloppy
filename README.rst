@@ -16,8 +16,6 @@ It strides to provide a unified interface to perform
 - Raytracing
 - Perturbation theory on top of paraxial eigenmodes
 
-.. raw:: html
-<iframe src="/docs/demo.html" width="100%" height="500px" frameborder="0"></iframe>
 
 Description
 ===========
