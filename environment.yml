@@ -1,0 +1,16 @@
+name: sloppymodern
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - datashader
+  - hvplot
+  - ipykernel
+  - ipympl
+  - ipywidgets
+  - k3d
+  - matplotlib
+  - numba
+  - numpy
+  - python
+prefix: /Users/lukas/anaconda3/envs/sloppymodern
