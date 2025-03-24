@@ -207,7 +207,7 @@ class CurvedMirror(Optic):
         return mesh
 
 class FreeFormMirror(Mirror):
-    """Free form radially symmetric optic of the form z = \sum_i=0^deg coef[i] r**i
+    """Free form radially symmetric optic of the form z = \\sum_i=0^deg coef[i] r**i
     Args:
         coef (ndarray): coefficients
     """
@@ -409,7 +409,7 @@ class FreeFormInterface(CurvedGlass):
         return sph4
     
 class ThorlabsAsphere(FreeFormInterface):
-    """Free form radially symmetric optic of the form z = \sum_i=0^deg coef[i] r**i
+    """Free form radially symmetric optic of the form z = \\sum_i=0^deg coef[i] r**i
     Args:
         coef (ndarray): coefficients [R, k, A2, A4, ...]
     """
