@@ -12,7 +12,6 @@ def geometry(mir):
     The function is more general and can also treat other optics like lenses etc.,
     one just has to be careful with the normal vectors of transmitting elements.
 
-
     Args:
         mir (ndarray): Array containing the mirror positions with shape (Nmirror, 3).
 
@@ -31,7 +30,6 @@ def geometry(mir):
                 'Ls': distances between the elements,
                 'Lrt': total roundtrip distance
             }
-            
     """ 
     Nm = len(mir)
     M = mir[:,None,:]-mir[None,:,:]
@@ -154,16 +152,15 @@ def geometry_old(mir):
     return {'mir': mir, 'M': M, 'n': n, 'refl': refl, 'angles': angles, 'xin': xin, 'xout': xout, 'yin': yin, 'yout': yout, 'R': R4, 'Ls': Ls, 'Lrt': Lrt}
 
 def plot_geometry(geom, scale_factor=1., arrow_length=2., **kwargs):
-    """Plot cavity geometry including coordinate systems.
-
+    """Plot the geometry of optical elements.
+    
     Args:
-        geom (dict): A dict of cavity geometry from :function:`geometry`.
-        **kwargs: Arbitrary keyword arguments.
-
+        geom (dict): Geometry dictionary from geometry function.
+        scale_factor (float): Scale factor for the plot.
+        arrow_length (float): Length of the arrows.
+        
     Returns:
-        k3d.plot: 3D plot of the geometry
-
-
+        k3d.plot: Plot object with the geometry.
     """
     mir, n, refl, yin, yout = geom['mir'], geom['n'], geom['refl'], geom['yin'], geom['yout']
     Nm = len(mir)
