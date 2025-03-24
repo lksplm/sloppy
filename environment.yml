@@ -13,4 +13,7 @@ dependencies:
   - numba
   - numpy
   - python
+  - pip
+  - pip:
+    - .
 prefix: /Users/lukas/anaconda3/envs/sloppymodern

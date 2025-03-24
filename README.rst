@@ -7,6 +7,8 @@
 Simon Lab Optics Package in PYthon
 ======
 
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/lksplm/sloppy/HEAD?urlpath=%2Fdoc%2Ftree%2Findex.ipynb)
+
 The Simon Lab Optics Package in PYthon is a collection of computational methods for the design of optical systems, especially cavities.
 
 It strides to provide a unified interface to perform
@@ -14,6 +16,8 @@ It strides to provide a unified interface to perform
 - Raytracing
 - Perturbation theory on top of paraxial eigenmodes
 
+.. raw:: html
+<iframe src="/docs/demo.html" width="100%" height="500px" frameborder="0"></iframe>
 
 Description
 ===========
