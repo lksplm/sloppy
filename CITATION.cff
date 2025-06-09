@@ -1,0 +1,26 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: sloppy
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Lukas
+    family-names: Palm
+    email: lukasp@stanford.edu
+    affiliation: 'Stanford University, University of Chicago'
+    orcid: 'https://orcid.org/0000-0003-1383-4293'
+repository-code: 'https://github.com/lksplm/sloppy/'
+abstract: >-
+  The Simon Lab Optics Package in PYthon is a collection of
+  computational methods for the design of optical systems,
+  especially cavities.
+
+  It' s a framework coupling ABCD matrix formalism,
+  raytracing and perturbation theory for semiclassical and
+  quantized analysis of novel cavity geometries and their
+  mode spectra.
+license: MIT
