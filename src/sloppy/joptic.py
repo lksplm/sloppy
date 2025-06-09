@@ -37,15 +37,10 @@ spec = [
     ('Rot', float64[:,:]), #rotation matrix into local coordinate system
     ('RotT', float64[:,:]),
     ('poffs', float64[:]),
-    ('ray', float64[:,:]),
-    ('rays', float64[:,:,:]),
-    ('mu', float64[:]),
-    ('mus', float64[:,:]),
-    ('v', float64[:]),
     ('coef', float64[:]),
     ('a1', float64[:]),
     ('a2', float64[:]),
-    ('origin_centered', boolean),
+    ('mla_flags', nb.types.Tuple((boolean, boolean))), # (is_origin_centered, is_square_lenslet)
 ]
 """
 otype: Main switch to set the type of optic considered>
@@ -63,7 +58,7 @@ otype: Main switch to set the type of optic considered>
 """
 @jitclass(spec)
 class JitOptic(object):
-    def __init__(self, p, n, ax, ay, Rot, rapt, R=0., nratio=1.0, otype=0, coef=np.zeros(3), a1=np.zeros(2), a2=np.zeros(2), origin_centered=False):
+    def __init__(self, p, n, ax, ay, Rot, rapt, R=0., nratio=1.0, otype=0, coef=np.zeros(3), a1=np.zeros(2), a2=np.zeros(2), mla_flags=(False, False)):
         self.rapt = rapt
         self.p = p
         self.n = n
@@ -72,13 +67,13 @@ class JitOptic(object):
         self.ax = ax
         self.ay = ay
         self.Rot = Rot
-        self.RotT = Rot.T
+        self.RotT = np.ascontiguousarray(Rot.T)
         self.coef = coef
 
         # Add MLA attributes
         self.a1 = a1
         self.a2 = a2
-        self.origin_centered = origin_centered
+        self.mla_flags = mla_flags
         
         self.otype = otype
         if self.otype == 2 or self.otype == 5: #CC
@@ -133,7 +128,11 @@ class JitOptic(object):
         x1 = r + t1*s
         x2 = r + t2*s
         
-        if fnorm(x1-self.p) <= fnorm(x2-self.p):
+        # Compare squared distances to avoid sqrt in fnorm for this comparison
+        d1_sq = dot(x1-self.p, x1-self.p)
+        d2_sq = dot(x2-self.p, x2-self.p)
+
+        if d1_sq <= d2_sq:
             x = x1
         else:
             x = x2
@@ -221,16 +220,24 @@ class JitOptic(object):
         # Calculate distance from the hit point to the center of the lenslet
         r_from_center = fnorm(center_coords)
         
-        # Calculate radius of the lenslet (half the minimum lattice vector length)
-        lenslet_radius = min(fnorm(self.a1), fnorm(self.a2)) / 2.0
+        # Calculate characteristic dimension of the lenslet (radius for circle, half-side for square)
+        lenslet_dimension = min(fnorm(self.a1), fnorm(self.a2)) / 2.0
         
-        # Check if intersection is within the circular lenslet
-        if r_from_center > lenslet_radius:
-            # Outside the lenslet, treat as flat surface
+        # Check if intersection is within the lenslet aperture
+        is_within_lenslet_aperture = False
+        if not self.mla_flags[1]:  # Spherical (circular) lenslet if mla_flags[1] is False
+            if r_from_center <= lenslet_dimension:
+                is_within_lenslet_aperture = True
+        else:  # Square lenslet if mla_flags[1] is True
+            if abs(center_coords[0]) <= lenslet_dimension and abs(center_coords[1]) <= lenslet_dimension:
+                is_within_lenslet_aperture = True
+        
+        if not is_within_lenslet_aperture:
+            # Outside the lenslet active area, treat as flat surface
             return q_flat
         
-        # Prevent sqrt of negative
-        if r_from_center >= self.R:
+        # Prevent sqrt of negative for spherical surface calculation
+        if r_from_center >= self.R: # This check relates to the spherical surface definition
             # The point is beyond the valid radius of the spherical cap
             return q_flat
         
@@ -532,15 +539,21 @@ class JitOptic(object):
         # Calculate distance from the hit point to the lenslet center
         r_from_center = fnorm(center_coords)
         
-        # Calculate radius of the lenslet
-        lenslet_radius = min(fnorm(self.a1), fnorm(self.a2)) / 2.0
+        # Calculate characteristic dimension of the lenslet
+        lenslet_dimension = min(fnorm(self.a1), fnorm(self.a2)) / 2.0
         
-        # Check if intersection is within the circular lenslet
-        if r_from_center > lenslet_radius:
-            # Outside the lenslet area, treat as flat interface
-            print("Outside the lenslet area, {r_from_center} > {lenslet_radius}")
-            return ray * np.inf  # Ray missed the surface
-            # return self._propagate_flat_interface(ray, clip)
+        # Check if intersection is within the lenslet aperture for propagation
+        hit_lenslet_active_area = False
+        if not self.mla_flags[1]:  # Spherical (circular) lenslet
+            if r_from_center <= lenslet_dimension:
+                hit_lenslet_active_area = True
+        else:  # Square lenslet
+            if abs(center_coords[0]) <= lenslet_dimension and abs(center_coords[1]) <= lenslet_dimension:
+                hit_lenslet_active_area = True
+        
+        if not hit_lenslet_active_area:
+            # Outside the lenslet active area, ray misses the lenslet
+            return ray * np.inf
         
         # Calculate the center of curvature for this lenslet
         if self.otype == 11:  # CC MLA
@@ -848,10 +861,9 @@ class JitOptic(object):
         b2 = np.array([-self.a1[1], self.a1[0]]) / det
         
         # Calculate offset
-        if self.origin_centered:
+        offset = np.zeros(2)
+        if self.mla_flags[0]: # is_origin_centered
             offset = -0.5 * (self.a1 + self.a2)
-        else:
-            offset = np.zeros(2)
         
         # Adjust point if lattice is centered
         adjusted_point = point - offset
